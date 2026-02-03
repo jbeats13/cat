@@ -1,0 +1,8 @@
+# Cat Tracker — camera + servo
+opencv-python>=4.8.0
+ultralytics>=8.0.0
+
+# Optional: for real servo (PCA9685 / Arducam pan-tilt). Omit to run with --no-servo only.
+# adafruit-circuitpython-servokit
+# adafruit-circuitpython-pca9685
+# adafruit-blinka

@@ -1,0 +1,284 @@
+#!/usr/bin/env python3
+"""
+Cat & Person Tracker — Track cats and/or people with a camera and pan/tilt servo.
+
+Uses YOLO to detect cats and/or people, then drives pan/tilt servos (e.g. PCA9685/Arducam)
+to keep the selected target centered in the frame.
+
+Usage:
+  python cat_tracker.py --install-deps           # Install required packages (run once)
+  python cat_tracker.py                           # Track cats and people (with servo)
+  python cat_tracker.py --track cat               # Track cats only
+  python cat_tracker.py --track person            # Track people only
+  python cat_tracker.py --no-servo                # Camera + detection only
+  python cat_tracker.py --camera 0                # Use camera index 0
+"""
+
+from __future__ import annotations
+
+import argparse
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+# --- Dependencies (baked in); install with: python cat_tracker.py --install-deps ---
+REQUIRED_PACKAGES = [
+    "opencv-python>=4.8.0",
+    "ultralytics>=8.0.0",
+]
+OPTIONAL_PACKAGES = [
+    "adafruit-circuitpython-servokit",
+    "adafruit-circuitpython-pca9685",
+    "adafruit-blinka",
+]
+
+
+def install_deps(include_optional: bool = False) -> None:
+    """Install REQUIRED_PACKAGES and optionally OPTIONAL_PACKAGES via pip."""
+    packages = list(REQUIRED_PACKAGES)
+    if include_optional:
+        packages.extend(OPTIONAL_PACKAGES)
+    cmd = [sys.executable, "-m", "pip", "install", "--upgrade"] + packages
+    print("Running: %s" % " ".join(cmd))
+    subprocess.check_call(cmd)
+    print("Done. You can run the tracker now.")
+
+
+# Add parent for repo root when resolving model path
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+# --- Servo driver (inlined so this file is self-contained) ---
+class _MockServo:
+    def __init__(self, num_ports: int = 4) -> None:
+        self._angles = [90] * num_ports
+
+    def set_angle(self, port: int, angle: int | float) -> None:
+        self._angles[port] = max(0, min(180, int(angle)))
+
+    def get_angle(self, port: int) -> int | float:
+        return self._angles[port]
+
+
+def _create_servo_driver(use_servo: bool = True, num_ports: int = 4):
+    if not use_servo:
+        return _MockServo(num_ports=num_ports)
+    try:
+        import adafruit_servokit
+    except ImportError:
+        return _MockServo(num_ports=num_ports)
+
+    class _PCA9685Servo:
+        def __init__(self) -> None:
+            self._kit = adafruit_servokit.ServoKit(channels=16)
+            for i in range(num_ports):
+                self._kit.servo[i].angle = 90
+
+        def set_angle(self, port: int, angle: int | float) -> None:
+            a = max(0, min(180, int(angle)))
+            self._kit.servo[port].angle = a
+
+        def get_angle(self, port: int) -> int | float:
+            return self._kit.servo[port].angle or 90
+
+    return _PCA9685Servo()
+
+# --- Config (override with CLI) ---
+MODEL_FILE = "yolo11s.pt"  # Path relative to repo root or cwd
+CONF = 0.35
+IOU = 0.3
+TRACKER = "bytetrack.yaml"
+PAN_SERVO_PORT = 0   # Arducam pan-tilt: 0=pan, 1=tilt
+TILT_SERVO_PORT = 1
+PAN_CENTER = 90
+TILT_CENTER = 90
+PAN_RANGE = (30, 150)   # Min/max pan angle
+TILT_RANGE = (50, 130)  # Min/max tilt angle
+GAIN = 0.4              # How aggressively to move (0.1 = slow, 0.8 = fast)
+DEADZONE = 0.05         # Ignore small errors (fraction of frame)
+WINDOW_NAME = "Cat & Person Tracker"
+
+
+def get_class_ids(model, class_names: list[str]) -> list[int]:
+    """Resolve class names to model class IDs. Unknown names are skipped."""
+    names = model.names
+    ids = []
+    for want in class_names:
+        want = want.strip().lower()
+        for idx, name in names.items():
+            if name and name.lower() == want:
+                ids.append(idx)
+                break
+    return ids
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Track cats and/or people with camera and servo")
+    parser.add_argument("--install-deps", action="store_true", help="Install required Python packages (run once)")
+    parser.add_argument("--install-deps-all", action="store_true", help="Install required + optional (servo) packages")
+    parser.add_argument("--no-servo", action="store_true", help="Run without servo (camera + detection only)")
+    parser.add_argument("--camera", type=int, default=0, help="Camera index (default 0)")
+    parser.add_argument("--model", type=str, default=MODEL_FILE, help="YOLO model path")
+    parser.add_argument("--gain", type=float, default=GAIN, help="Tracking gain (default %s)" % GAIN)
+    parser.add_argument(
+        "--track",
+        type=str,
+        default="cat,person",
+        help="Comma-separated classes to track: cat, person (default: cat,person)",
+    )
+    parser.add_argument("--no-window", action="store_true", help="Do not show OpenCV window")
+    args = parser.parse_args()
+
+    if args.install_deps:
+        install_deps(include_optional=False)
+        return
+    if args.install_deps_all:
+        install_deps(include_optional=True)
+        return
+
+    import cv2
+    from ultralytics import YOLO
+
+    model_path = Path(args.model)
+    if not model_path.is_absolute():
+        for base in (Path.cwd(), _REPO_ROOT):
+            p = base / model_path
+            if p.exists():
+                model_path = p
+                break
+    model = YOLO(str(model_path), task="detect")
+    track_classes = [s.strip() for s in args.track.split(",") if s.strip()]
+    class_ids = get_class_ids(model, track_classes)
+    if not class_ids:
+        raise SystemExit("No valid track classes. Use --track cat,person (or cat or person).")
+
+    cap = cv2.VideoCapture(args.camera)
+    if not cap.isOpened():
+        raise SystemError("Failed to open camera (index %s)." % args.camera)
+
+    servo = _create_servo_driver(use_servo=not args.no_servo, num_ports=4)
+    if servo:
+        servo.set_angle(PAN_SERVO_PORT, PAN_CENTER)
+        servo.set_angle(TILT_SERVO_PORT, TILT_CENTER)
+
+    pan_angle = float(PAN_CENTER)
+    tilt_angle = float(TILT_CENTER)
+    fps_counter, fps_timer, fps_display = 0, time.time(), 0
+    track_args = {"persist": True, "verbose": False}
+
+    if not args.no_window:
+        cv2.namedWindow(WINDOW_NAME)
+
+    try:
+        while cap.isOpened():
+            ok, frame = cap.read()
+            if not ok:
+                break
+
+            h, w = frame.shape[:2]
+            center_x, center_y = w / 2.0, h / 2.0
+
+            results = model.track(
+                frame,
+                conf=CONF,
+                iou=IOU,
+                max_det=10,
+                tracker=TRACKER,
+                classes=class_ids,
+                **track_args,
+            )
+            boxes = results[0].boxes
+            best_cx, best_cy = None, None
+            best_area = 0
+            best_label = None
+            names = model.names
+
+            detections_for_draw = []
+            if boxes is not None and boxes.data is not None:
+                data = boxes.data.cpu().tolist() if hasattr(boxes.data, "cpu") else list(boxes.data)
+                for row in data:
+                    if len(row) < 4:
+                        continue
+                    x1, y1, x2, y2 = map(int, row[:4])
+                    area = (x2 - x1) * (y2 - y1)
+                    cls_id = int(row[6]) if len(row) >= 7 else int(row[5]) if len(row) >= 6 else 0
+                    conf = float(row[5]) if len(row) >= 6 else 0.0
+                    label = names.get(cls_id, "?")
+                    if area > best_area:
+                        best_area = area
+                        best_cx = (x1 + x2) / 2.0
+                        best_cy = (y1 + y2) / 2.0
+                        best_label = label
+                    detections_for_draw.append((x1, y1, x2, y2, label, conf, area))
+
+            # Draw bounding boxes (tracked target = green, others = orange)
+            for (x1, y1, x2, y2, label, conf, area) in detections_for_draw:
+                cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
+                is_tracked = (
+                    best_cx is not None
+                    and abs(cx - best_cx) < 2
+                    and abs(cy - best_cy) < 2
+                )
+                if is_tracked:
+                    color = (0, 255, 0)
+                    thickness = 3
+                    box_label = "%s (tracking)" % label
+                else:
+                    color = (0, 165, 255)
+                    thickness = 2
+                    box_label = "%s %.0f%%" % (label, conf * 100)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
+                (tw, th), _ = cv2.getTextSize(box_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
+                cv2.rectangle(frame, (x1, y1 - th - 8), (x1 + tw + 4, y1), color, -1)
+                cv2.putText(frame, box_label, (x1 + 2, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+
+            if best_cx is not None and servo:
+                # Normalized error from center (-1..1)
+                err_x = (best_cx - center_x) / max(center_x, 1)
+                err_y = (best_cy - center_y) / max(center_y, 1)
+                if abs(err_x) < DEADZONE:
+                    err_x = 0
+                if abs(err_y) < DEADZONE:
+                    err_y = 0
+                pan_angle = pan_angle + args.gain * err_x * (PAN_RANGE[1] - PAN_RANGE[0]) * 0.5
+                tilt_angle = tilt_angle + args.gain * err_y * (TILT_RANGE[1] - TILT_RANGE[0]) * 0.5
+                pan_angle = max(PAN_RANGE[0], min(PAN_RANGE[1], pan_angle))
+                tilt_angle = max(TILT_RANGE[0], min(TILT_RANGE[1], tilt_angle))
+                servo.set_angle(PAN_SERVO_PORT, int(round(pan_angle)))
+                servo.set_angle(TILT_SERVO_PORT, int(round(tilt_angle)))
+
+            # Draw
+            if best_cx is not None:
+                cx, cy = int(best_cx), int(best_cy)
+                cv2.circle(frame, (cx, cy), 12, (0, 255, 0), 2)
+                cv2.line(frame, (cx - 20, cy), (cx + 20, cy), (0, 255, 0), 2)
+                cv2.line(frame, (cx, cy - 20), (cx, cy + 20), (0, 255, 0), 2)
+            cv2.circle(frame, (int(center_x), int(center_y)), 6, (128, 128, 128), 1)
+
+            fps_counter += 1
+            if time.time() - fps_timer >= 1.0:
+                fps_display = fps_counter
+                fps_counter = 0
+                fps_timer = time.time()
+            status = "FPS: %d | Target: %s" % (fps_display, best_label if best_label else "none")
+            cv2.putText(
+                frame, status,
+                (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2
+            )
+
+            if not args.no_window:
+                cv2.imshow(WINDOW_NAME, frame)
+            if (cv2.waitKey(1) & 0xFF) == ord("q"):
+                break
+    finally:
+        cap.release()
+        if servo:
+            servo.set_angle(PAN_SERVO_PORT, PAN_CENTER)
+            servo.set_angle(TILT_SERVO_PORT, TILT_CENTER)
+        cv2.destroyAllWindows()
+
+
+if __name__ == "__main__":
+    main()
