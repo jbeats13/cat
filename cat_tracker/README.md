@@ -62,6 +62,8 @@ The PCA9685 connects over **I2C**. On the Raspberry Pi 40-pin header, use:
 
 So you only use **GPIO 2 (SDA)** and **GPIO 3 (SCL)** for data; the rest is 3.3 V and GND. The servos plug into the PCA9685 board, not into the Pi. (If your board uses 5 V for logic, connect VCC to Pi pin 2 or 4 (5 V) instead of 3.3 V — check your PCA9685 module.)
 
+To **test the servos** without the full tracker: `python3 test_servo.py` (sweeps pan and tilt; use `--once` to run once and exit, or `--mock` to print angles only).
+
 **3. Install Python and create a virtualenv**
 
 ```bash
@@ -115,113 +117,22 @@ Without the servo (camera + detection only):
 python3 cat_tracker.py --no-servo --no-window
 ```
 
-Press **Ctrl+C** to stop. To have it start when the Pi boots, see **[Run at boot](#8-run-at-boot-start-when-the-pi-turns-on)** below.
+Press **Ctrl+C** to stop. To start at boot, see **[Run at boot](#run-at-boot-start-when-the-pi-turns-on)** below.
 
 ---
 
-## Running on Raspberry Pi (detailed)
+## Raspberry Pi (extra detail)
 
-### 1. System setup
+**Camera:** USB webcam is usually `--camera 0`. Pi Camera (CSI) with libcamera/V4L2 may also appear as `/dev/video0`. The script expects an OpenCV `VideoCapture` index.
 
-- Use **Raspberry Pi OS** (64-bit recommended for better performance).
-- Update the system:
-  ```bash
-  sudo apt update && sudo apt upgrade -y
-  ```
+**I2C check:** After enabling I2C and rebooting, run `ls /dev/i2c*`; you should see `/dev/i2c-1`.
 
-### 2. Enable I2C (for PCA9685 servo board)
-
-1. Run `sudo raspi-config`.
-2. Go to **Interface Options** → **I2C** → **Yes** to enable.
-3. Reboot: `sudo reboot`.
-4. After reboot, check that I2C is visible:
-   ```bash
-   ls /dev/i2c*
-   ```
-   You should see `/dev/i2c-1` (or similar).
-
-### 3. Camera
-
-- **USB webcam:** Plug it in; it will usually show up as `/dev/video0`. Use `--camera 0` (default).
-- **Raspberry Pi Camera (CSI):** If you use `libcamera`/V4L2, it may appear as a video device (e.g. `/dev/video0`). Use `--camera 0`. If you use a different stack, you may need to point the script at a different source (e.g. a GStreamer or picamera2 pipeline); the script expects a OpenCV `VideoCapture` index by default.
-
-### 4. Python and dependencies
-
-```bash
-# Install Python 3 and pip if needed
-sudo apt install -y python3 python3-pip python3-venv
-
-# Clone or copy your repo onto the Pi (e.g. ~/cat), then:
-cd ~/cat/cat_tracker
-
-# Use a virtualenv (recommended)
-python3 -m venv venv
-source venv/bin/activate
-
-# Install packages using the script (dependencies are baked into cat_tracker.py)
-python3 cat_tracker.py --install-deps        # opencv + ultralytics
-python3 cat_tracker.py --install-deps-all   # + Adafruit libs for servo (PCA9685)
-```
-
-**Note:** If you run **without a display** (e.g. over SSH), use the headless OpenCV build so it doesn’t try to open a GUI:
-
-```bash
-pip uninstall opencv-python -y
-pip install opencv-python-headless
-```
-
-Then run with `--no-window` (see below).
-
-### 5. Model file
-
-Ensure the YOLO model is on the Pi. From the repo root (e.g. `~/cat`):
-
-```bash
-# If yolo11s.pt is not already there, download or copy it to ~/cat/
-ls ~/cat/yolo11s.pt
-```
-
-The script looks for `yolo11s.pt` in the repo root when you run from `cat_tracker/`.
-
-### 6. Run the tracker
-
-**With display (Pi connected to monitor + keyboard):**
-
-```bash
-cd ~/cat/cat_tracker
-source venv/bin/activate   # if using venv
-python3 cat_tracker.py
-```
-
-**Without display (SSH or headless):**
-
-```bash
-cd ~/cat/cat_tracker
-source venv/bin/activate
-python3 cat_tracker.py --no-window
-```
-
-**Without servo (test detection only):**
-
-```bash
-python3 cat_tracker.py --no-servo --no-window
-```
-
-**Track only people:**
-
-```bash
-python3 cat_tracker.py --track person --no-window
-```
-
-Press **Ctrl+C** in the terminal to stop.
-
-### 7. Performance on Pi
+### Performance on Pi
 
 - YOLO on Raspberry Pi (CPU only) is relatively slow (often a few FPS). That’s normal.
-- To speed up a bit: use a smaller model if you have one (e.g. nano variant), or lower the camera resolution in your pipeline.
-- For faster inference, use a Pi with **NPU** (e.g. Raspberry Pi 5 with compatible software) if you have support for it; the current script does not require it.
+- To speed up: use a smaller model or lower camera resolution; or a Pi with NPU (e.g. Pi 5) if supported.
 
-### 8. Run at boot (start when the Pi turns on)
+### Run at boot (start when the Pi turns on)
 
 You can make the cat tracker start automatically when the Raspberry Pi boots. That way you don’t need to SSH in and run it by hand. This uses **systemd**, the service manager built into Raspberry Pi OS.
 
@@ -316,33 +227,10 @@ After you **disable** the service, it will no longer start when the Pi turns on 
 
 ---
 
-## Setup (general)
-
-All required packages are listed inside `cat_tracker.py`. Install them with:
-
-```bash
-cd cat_tracker
-python3 cat_tracker.py --install-deps
-```
-
-That installs **opencv-python** and **ultralytics**. For servo hardware (PCA9685) on a Pi, also run:
-
-```bash
-python3 cat_tracker.py --install-deps-all
-```
-
-That adds **adafruit-circuitpython-servokit**, **adafruit-circuitpython-pca9685**, and **adafruit-blinka**. You only need `--install-deps-all` if you use the pan/tilt servo board.
-
-You can still use `pip install -r requirements.txt` if you prefer; the script’s `--install-deps` / `--install-deps-all` are equivalent. For **Raspberry Pi** (I2C + servo, camera, headless, startup), see **[Running on Raspberry Pi](#running-on-raspberry-pi)** above.
-
 ## Usage
 
-**Install dependencies (run once):**
-
-```bash
-python3 cat_tracker.py --install-deps       # opencv-python + ultralytics
-python3 cat_tracker.py --install-deps-all  # + Adafruit libs for PCA9685 servo
-```
+**Install dependencies (run once):**  
+`python3 cat_tracker.py --install-deps` (opencv + ultralytics). For servo: `python3 cat_tracker.py --install-deps-all`. Or use `pip install -r requirements.txt`.
 
 **With servo (default):**  
 Camera + YOLO + pan/tilt servos to follow the largest cat or person.
@@ -358,20 +246,7 @@ Use on a machine without PCA9685 or to test.
 python3 cat_tracker.py --no-servo
 ```
 
-**Track cats only, or people only:**
-
-```bash
-python3 cat_tracker.py --track cat
-python3 cat_tracker.py --track person
-python3 cat_tracker.py --track cat,person   # both (default)
-```
-
-**Headless (no display):**  
-Use `--no-window` when running over SSH or without a monitor. On Raspberry Pi, use `opencv-python-headless` instead of `opencv-python` so no GUI stack is required.
-
-```bash
-python3 cat_tracker.py --no-window
-```
+**Track:** `--track cat`, `--track person`, or `--track cat,person` (default). **Headless:** `--no-window` (see [Troubleshooting](#troubleshooting) for Qt/wayland and headless OpenCV).
 
 **All options:**
 
@@ -390,6 +265,20 @@ python3 cat_tracker.py --no-window
 Press **q** in the window to quit (or **Ctrl+C** in the terminal if using `--no-window`).
 
 ## Troubleshooting
+
+**"externally-managed-environment"** or **"No module named 'cv2'"**  
+Use a virtual environment and install dependencies there. From `~/cat/cat_tracker`: `python3 -m venv venv`, `source venv/bin/activate`, then `python3 cat_tracker.py --install-deps`. Always activate the venv before running the script. If using an IDE, set it to use the venv Python (e.g. `venv/bin/python3`).
+
+**"bash: .../venv/bin/python3: No such file or directory"**  
+Your shell is still using an old (broken or incomplete) virtualenv. Deactivate it, remove the venv folder, then create a new one:
+
+```bash
+deactivate
+rm -rf venv
+sudo apt install -y python3-venv   # if on Debian/Ubuntu/Pi and venv fails
+python3 -m venv venv
+source venv/bin/activate
+```
 
 **"Ambiguous option: --no could match --no-servo, --no-window"**  
 Use the **full** flag: `--no-window` or `--no-servo`, not `--no`.
