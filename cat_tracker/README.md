@@ -61,7 +61,15 @@ python3 test_servo.py --once      # Sweep once and exit
 python3 test_servo.py --mock      # No hardware; print angles only (no Adafruit libs needed)
 ```
 
-If you see **"adafruit_servokit not found"**, run `python3 -m pip install adafruit-circuitpython-servokit adafruit-circuitpython-pca9685 adafruit-blinka` in the same venv, or use `--mock`. To check if the Pi sees the board: `sudo apt install -y i2c-tools` then `sudo i2cdetect -y 1`; you should see **40** in the grid.
+If you see **"adafruit_servokit not found"**, the Adafruit libraries aren’t in your venv yet. These are the same packages the Arducam pan-tilt examples use (see `PCA9685/example/Jetson/ServoKit.py`). With the venv active, run:
+
+```bash
+python3 -m pip install adafruit-circuitpython-servokit adafruit-circuitpython-pca9685 adafruit-blinka
+```
+
+Then run `python3 test_servo.py --once` again. To confirm the install: `python3 -c "import adafruit_servokit; print('OK')"`. Or use `--mock` to test without hardware.
+
+To check if the Pi sees the board: `sudo apt install -y i2c-tools` then `sudo i2cdetect -y 1`; you should see **40** in the grid.
 
 ---
 
@@ -329,7 +337,7 @@ source venv/bin/activate
 Use the **full** flag: `--no-window` or `--no-servo`, not `--no`.
 
 **"adafruit_servokit not found" when running `test_servo.py`**  
-Install the servo libraries in your venv: `python3 cat_tracker.py --install-deps-all`. Or run `python3 test_servo.py --mock` to test without hardware (no Adafruit libs needed). See [Test the servos first (optional)](#test-the-servos-first-optional).
+Install into the **same** Python that runs the script: run `python3 test_servo.py --install` (installs into that Python, then run `test_servo.py` again). Or run `python3 -m pip install adafruit-circuitpython-servokit adafruit-circuitpython-pca9685 adafruit-blinka` with the venv active. If it still fails: run `which python3` and `python3 -m pip list | grep -i adafruit` to confirm you’re in the venv and packages are there; or run `./venv/bin/python3 test_servo.py --install` then `./venv/bin/python3 test_servo.py --once` so the same interpreter is used. Or use `--mock` to test without hardware.
 
 **Servo not tracking**  
 If the servo doesn’t follow you (or the cat), check: (1) You’re not using `--no-servo`. (2) Minimum box size: the default is 50×50 px. If you previously raised `--min-width` / `--min-height` (e.g. to 1000×700), only very large, close-up detections are tracked; lower them or omit them to track normal-sized people. (3) I2C is enabled and the PCA9685 is wired correctly.

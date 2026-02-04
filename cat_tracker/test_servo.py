@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import subprocess
 import sys
 import time
 
@@ -38,10 +39,10 @@ def get_servo(mock: bool):
     try:
         import adafruit_servokit
     except ImportError:
-        print("adafruit_servokit not found. Install with (venv must be active):")
-        print("  python3 -m pip install adafruit-circuitpython-servokit adafruit-circuitpython-pca9685 adafruit-blinka")
-        print("  # or: python3 cat_tracker.py --install-deps-all")
-        print("Or run with --mock to test without hardware.")
+        print("adafruit_servokit not found.")
+        print("Run: python3 test_servo.py --install   (installs into this Python, then try again)")
+        print("Or:  python3 -m pip install adafruit-circuitpython-servokit adafruit-circuitpython-pca9685 adafruit-blinka")
+        print("Or:  python3 test_servo.py --mock     (test without hardware)")
         sys.exit(1)
     kit = adafruit_servokit.ServoKit(channels=16)
     kit.servo[PAN_PORT].angle = CENTER_PAN
@@ -58,7 +59,19 @@ def main():
     parser = argparse.ArgumentParser(description="Test PCA9685 pan/tilt servos")
     parser.add_argument("--once", action="store_true", help="Sweep once then exit")
     parser.add_argument("--mock", action="store_true", help="No hardware; print angles only")
+    parser.add_argument("--install", action="store_true", help="Install Adafruit libs into this Python, then exit")
     args = parser.parse_args()
+
+    if args.install:
+        pkgs = [
+            "adafruit-circuitpython-servokit",
+            "adafruit-circuitpython-pca9685",
+            "adafruit-blinka",
+        ]
+        print("Installing into %s ..." % sys.executable)
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "--upgrade"] + pkgs)
+        print("Done. Run: python3 test_servo.py --once")
+        return
 
     print("Servo test (pan port %d, tilt port %d)" % (PAN_PORT, TILT_PORT))
     if args.mock:
