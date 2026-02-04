@@ -482,7 +482,7 @@ This happens when OpenCV (with Qt) tries to open a window but your environment d
   ```  
   The script sets `QT_QPA_PLATFORM=offscreen` when you use `--no-window`, so Qt doesn’t try to load wayland and the error goes away. Tracking still runs; you just don’t see the video window.
 
-- **Option 2 — Show a window on Pi:** The script sets `QT_QPA_PLATFORM=xcb` when you run without `--no-window`, so Qt uses X11 instead of Wayland. Run `python3 cat_tracker.py`. If you still see Wayland or font errors, try: `QT_QPA_PLATFORM=xcb python3 cat_tracker.py`. If the window still doesn't appear, use Option 1.
+- **Option 2 — Show a window on Pi:** The script sets `QT_QPA_PLATFORM=xcb` and `QT_QPA_FONTDIR` to system fonts so Qt doesn't look for the missing `cv2/qt/fonts` folder. Run `python3 cat_tracker.py`. If you still see "QFontDatabase: Cannot find font directory", install system fonts and retry: `sudo apt install -y fonts-dejavu-core`, then `QT_QPA_FONTDIR=/usr/share/fonts python3 cat_tracker.py`. If the window still doesn't appear, use Option 1.
 
 - **Option 3 — Use headless OpenCV (no Qt at all):**  
   ```bash

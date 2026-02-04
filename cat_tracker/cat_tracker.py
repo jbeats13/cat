@@ -158,6 +158,37 @@ def main():
     else:
         # Use X11 backend so we don't need the Qt "wayland" plugin (often missing in venv)
         os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
+        # Qt looks for cv2/qt/fonts and fails if missing; create it and copy a system font
+        try:
+            import importlib.util
+            _spec = importlib.util.find_spec("cv2")
+            if _spec is not None and _spec.origin:
+                _cv2_dir = Path(_spec.origin).resolve().parent
+                _qt_fonts = _cv2_dir / "qt" / "fonts"
+                if not _qt_fonts.is_dir() or not any(_qt_fonts.iterdir()):
+                    _qt_fonts.mkdir(parents=True, exist_ok=True)
+                    _copied = False
+                    for _guess in (
+                        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+                        "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
+                    ):
+                        if Path(_guess).is_file():
+                            import shutil
+                            shutil.copy2(_guess, _qt_fonts / Path(_guess).name)
+                            _copied = True
+                            break
+                    if not _copied:
+                        for _parent in ("/usr/share/fonts/truetype", "/usr/share/fonts"):
+                            if Path(_parent).is_dir():
+                                _first = next(Path(_parent).rglob("*.ttf"), None)
+                                if _first is not None:
+                                    import shutil
+                                    shutil.copy2(str(_first), _qt_fonts / _first.name)
+                                    break
+                                break
+        except Exception:
+            pass  # continue; Qt may still warn about fonts
 
     import cv2
     from ultralytics import YOLO
