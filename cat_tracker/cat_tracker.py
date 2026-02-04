@@ -101,7 +101,7 @@ PAN_CENTER = 90
 TILT_CENTER = 90
 PAN_RANGE = (30, 150)   # Min/max pan angle
 TILT_RANGE = (50, 130)  # Min/max tilt angle
-GAIN = 0.4              # How aggressively to move (0.1 = slow, 0.8 = fast)
+GAIN = 0.55             # How aggressively to move (0.2 = slow, 0.8 = fast)
 DEADZONE = 0.05         # Ignore small errors (fraction of frame)
 SCAN_STEP = 2.0         # Pan degrees per frame when no target (left-right scan)
 SCAN_START_FRAMES = 10  # Frames with no target before starting scan (avoids flicker)
@@ -143,6 +143,8 @@ def main():
     parser.add_argument("--list-classes", action="store_true", help="Load model, print its class names, and exit (to check if person/cat exist)")
     parser.add_argument("--conf", type=float, default=CONF, help="Detection confidence threshold 0–1 (default %.2f); try 0.2–0.25 on Pi if no detections" % CONF)
     parser.add_argument("--debug", action="store_true", help="Print detection count and servo angles every 20 frames (for troubleshooting)")
+    parser.add_argument("--invert-pan", action="store_true", help="Reverse pan direction (if camera moves wrong way)")
+    parser.add_argument("--invert-tilt", action="store_true", help="Reverse tilt direction (if camera moves wrong way)")
     args = parser.parse_args()
 
     if args.install_deps:
@@ -243,16 +245,32 @@ def main():
     scan_direction = 1  # 1 = pan right, -1 = pan left (when no target)
     frames_no_target = 0  # Consecutive frames with no person/cat
     fps_counter, fps_timer, fps_display = 0, time.time(), 0
+    last_status_print = 0.0  # Time of last status line (so we print every 2s when headless)
     track_args = {"persist": True, "verbose": False}
 
-    if not args.no_window:
-        cv2.namedWindow(WINDOW_NAME)
+    show_window = not args.no_window
+    if show_window:
+        try:
+            cv2.namedWindow(WINDOW_NAME)
+        except cv2.error as e:
+            show_window = False
+            print("Could not open display window: %s" % e, flush=True)
+            print("Continuing without window (tracking and servo still work). Ctrl+C to stop.", flush=True)
+            print("FPS and target will print every 10 frames.", flush=True)
 
     try:
+        if not show_window:
+            print("Headless: status every 2s below. Ctrl+C to stop.", flush=True)
+        if not args.no_window and not show_window:
+            print("(Window could not be opened; continuing without display.)", flush=True)
+        frame_count = 0
         while cap.isOpened():
             ok, frame = cap.read()
             if not ok:
                 break
+            frame_count += 1
+            if frame_count == 1 and not show_window:
+                print("First frame received. Running detection (may be slow on Pi)...", flush=True)
 
             h, w = frame.shape[:2]
             center_x, center_y = w / 2.0, h / 2.0
@@ -335,6 +353,10 @@ def main():
                     # Track target: center the largest person/cat
                     err_x = (best_cx - center_x) / max(center_x, 1)
                     err_y = (best_cy - center_y) / max(center_y, 1)
+                    if args.invert_pan:
+                        err_x = -err_x
+                    if args.invert_tilt:
+                        err_y = -err_y
                     if abs(err_x) < DEADZONE:
                         err_x = 0
                     if abs(err_y) < DEADZONE:
@@ -359,7 +381,7 @@ def main():
                             scan_direction = 1
                         servo.set_angle(PAN_SERVO_PORT, int(round(pan_angle)))
                         servo.set_angle(TILT_SERVO_PORT, int(round(tilt_angle)))
-                        if args.no_window and fps_counter % 15 == 0:
+                        if not show_window and fps_counter % 15 == 0:
                             print("Scan: pan=%d (get out of frame to see scan)" % int(round(pan_angle)), flush=True)
 
             num_detections = len(detections_for_draw)
@@ -382,27 +404,32 @@ def main():
                 fps_display = fps_counter
                 fps_counter = 0
                 fps_timer = time.time()
-            if args.no_window and (fps_counter % 10 == 0 or fps_counter == 1):
-                print("FPS: %d | Target: %s" % (fps_display, best_label if best_label else "scanning"), flush=True)
+            # When headless: print status at least every 2 seconds (so slow Pi still shows output)
+            now = time.time()
+            if not show_window and (now - last_status_print >= 2.0 or frame_count <= 2):
+                last_status_print = now
+                msg = "FPS: %d | Target: %s" % (fps_display, best_label if best_label else "scanning")
+                if servo:
+                    msg += " | pan=%d tilt=%d" % (int(round(pan_angle)), int(round(tilt_angle)))
+                print(msg, flush=True)
             status = "FPS: %d | Target: %s" % (fps_display, best_label if best_label else "scanning")
             cv2.putText(
                 frame, status,
                 (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2
             )
 
-            if not args.no_window:
+            if show_window:
                 cv2.imshow(WINDOW_NAME, frame)
                 if (cv2.waitKey(1) & 0xFF) == ord("q"):
                     break
             else:
-                # Headless: no GUI; use short sleep and rely on Ctrl+C to exit
                 time.sleep(0.03)
     finally:
         cap.release()
         if servo:
             servo.set_angle(PAN_SERVO_PORT, PAN_CENTER)
             servo.set_angle(TILT_SERVO_PORT, TILT_CENTER)
-        if not args.no_window:
+        if show_window:
             cv2.destroyAllWindows()
 
 
