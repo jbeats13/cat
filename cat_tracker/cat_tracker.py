@@ -103,7 +103,8 @@ PAN_RANGE = (30, 150)   # Min/max pan angle
 TILT_RANGE = (50, 130)  # Min/max tilt angle
 GAIN = 0.4              # How aggressively to move (0.1 = slow, 0.8 = fast)
 DEADZONE = 0.05         # Ignore small errors (fraction of frame)
-SCAN_STEP = 0.5         # Pan degrees per frame when no target (left-right scan)
+SCAN_STEP = 2.0         # Pan degrees per frame when no target (left-right scan)
+SCAN_START_FRAMES = 10  # Frames with no target before starting scan (avoids flicker)
 MIN_TRACK_WIDTH = 0   # Min box width (px) to track; 0 = any size
 MIN_TRACK_HEIGHT = 0  # Min box height (px) to track; 0 = any size
 WINDOW_NAME = "Cat & Person Tracker"
@@ -140,6 +141,8 @@ def main():
     parser.add_argument("--min-width", type=int, default=MIN_TRACK_WIDTH, help="Min box width (px) to track; 0 = any size (default %s)" % MIN_TRACK_WIDTH)
     parser.add_argument("--min-height", type=int, default=MIN_TRACK_HEIGHT, help="Min box height (px) to track; 0 = any size (default %s)" % MIN_TRACK_HEIGHT)
     parser.add_argument("--list-classes", action="store_true", help="Load model, print its class names, and exit (to check if person/cat exist)")
+    parser.add_argument("--conf", type=float, default=CONF, help="Detection confidence threshold 0–1 (default %.2f); try 0.2–0.25 on Pi if no detections" % CONF)
+    parser.add_argument("--debug", action="store_true", help="Print detection count and servo angles every 20 frames (for troubleshooting)")
     args = parser.parse_args()
 
     if args.install_deps:
@@ -204,6 +207,7 @@ def main():
     pan_angle = float(PAN_CENTER)
     tilt_angle = float(TILT_CENTER)
     scan_direction = 1  # 1 = pan right, -1 = pan left (when no target)
+    frames_no_target = 0  # Consecutive frames with no person/cat
     fps_counter, fps_timer, fps_display = 0, time.time(), 0
     track_args = {"persist": True, "verbose": False}
 
@@ -221,7 +225,7 @@ def main():
 
             results = model.track(
                 frame,
-                conf=CONF,
+                conf=args.conf,
                 iou=IOU,
                 max_det=10,
                 tracker=TRACKER,
@@ -293,6 +297,7 @@ def main():
 
             if servo:
                 if best_cx is not None:
+                    frames_no_target = 0
                     # Track target: center the largest person/cat
                     err_x = (best_cx - center_x) / max(center_x, 1)
                     err_y = (best_cy - center_y) / max(center_y, 1)
@@ -307,16 +312,28 @@ def main():
                     servo.set_angle(PAN_SERVO_PORT, int(round(pan_angle)))
                     servo.set_angle(TILT_SERVO_PORT, int(round(tilt_angle)))
                 else:
-                    # No target: scan pan left and right
-                    pan_angle = pan_angle + scan_direction * SCAN_STEP
-                    if pan_angle >= PAN_RANGE[1]:
-                        pan_angle = float(PAN_RANGE[1])
-                        scan_direction = -1
-                    elif pan_angle <= PAN_RANGE[0]:
-                        pan_angle = float(PAN_RANGE[0])
-                        scan_direction = 1
-                    servo.set_angle(PAN_SERVO_PORT, int(round(pan_angle)))
-                    servo.set_angle(TILT_SERVO_PORT, int(round(tilt_angle)))  # keep tilt where it was
+                    frames_no_target += 1
+                    # Start scanning only after no target for several frames (avoids flicker)
+                    if frames_no_target >= SCAN_START_FRAMES:
+                        # No target: scan pan left and right
+                        pan_angle = pan_angle + scan_direction * SCAN_STEP
+                        if pan_angle >= PAN_RANGE[1]:
+                            pan_angle = float(PAN_RANGE[1])
+                            scan_direction = -1
+                        elif pan_angle <= PAN_RANGE[0]:
+                            pan_angle = float(PAN_RANGE[0])
+                            scan_direction = 1
+                        servo.set_angle(PAN_SERVO_PORT, int(round(pan_angle)))
+                        servo.set_angle(TILT_SERVO_PORT, int(round(tilt_angle)))
+                        if args.no_window and fps_counter % 15 == 0:
+                            print("Scan: pan=%d (get out of frame to see scan)" % int(round(pan_angle)), flush=True)
+
+            num_detections = len(detections_for_draw)
+            if args.debug and fps_counter % 20 == 0:
+                msg = "detections=%d target=%s" % (num_detections, best_label if best_label else "none")
+                if servo:
+                    msg += " pan=%d tilt=%d" % (int(round(pan_angle)), int(round(tilt_angle)))
+                print("DEBUG: %s" % msg, flush=True)
 
             # Draw
             if best_cx is not None:

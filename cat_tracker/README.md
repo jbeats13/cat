@@ -127,6 +127,7 @@ Press **Q** in the window to quit, or **Ctrl+C** in the terminal.
 | `No I2C device at address: 0x40` | Enable I2C in `raspi-config`, reboot, run `i2cdetect -y 1` and check wiring (SDA/SCL/VCC/GND). |
 | Camera doesn’t open / black window | Try `--camera 0` or `--camera 1`. On Pi, ensure the camera is enabled and recognized. |
 | No detections / “Target: none” | Point camera at a cat or person; ensure the model supports those classes (default model does). You can lower `--min-width` and `--min-height` if the target is small. |
+| **Servo works (test_servo) but tracking doesn’t move the camera** | Run `python3 cat_tracker.py --list-classes` and confirm you see `person` and `cat`. Then run with `--debug` to see `detections=N target=... pan=... tilt=...` every 20 frames. If `detections=0` or `target=none` while you’re in frame, lower the confidence: `--conf 0.25` or `--conf 0.2`. |
 
 More detail: [Troubleshooting](#troubleshooting) and [Get it from GitHub and run on Raspberry Pi](#get-it-from-github-and-run-on-raspberry-pi).
 
