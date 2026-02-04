@@ -29,7 +29,97 @@ You need a YOLO model (e.g. `yolo11s.pt`) in the repo root; the script looks for
 
 ---
 
-## Running on Raspberry Pi
+## Get it from GitHub and run on Raspberry Pi
+
+End-to-end steps to clone the repo on a Pi and run the tracker.
+
+**1. Clone the repo**
+
+```bash
+cd ~
+git clone https://github.com/jbeats13/cat.git
+cd cat/cat_tracker
+```
+
+**2. (Optional) Enable I2C if you use the servo board**
+
+```bash
+sudo raspi-config
+# Interface Options → I2C → Enable, then reboot
+sudo reboot
+```
+
+**GPIO pins for PCA9685 (servo board)**  
+The PCA9685 connects over **I2C**. On the Raspberry Pi 40-pin header, use:
+
+| Pi pin | GPIO | PCA9685 | Notes |
+|--------|------|---------|--------|
+| 1      | —    | VCC     | 3.3 V |
+| 3      | GPIO 2 | SDA   | I2C data |
+| 5      | GPIO 3 | SCL   | I2C clock |
+| 6      | —    | GND     | Ground |
+| 9      | —    | GND     | Ground (optional second GND) |
+
+So you only use **GPIO 2 (SDA)** and **GPIO 3 (SCL)** for data; the rest is 3.3 V and GND. The servos plug into the PCA9685 board, not into the Pi. (If your board uses 5 V for logic, connect VCC to Pi pin 2 or 4 (5 V) instead of 3.3 V — check your PCA9685 module.)
+
+**3. Install Python and create a virtualenv**
+
+```bash
+sudo apt update
+sudo apt install -y python3 python3-pip python3-venv
+python3 -m venv venv
+source venv/bin/activate
+```
+
+**4. Install dependencies from the script**
+
+```bash
+python3 cat_tracker.py --install-deps        # opencv + ultralytics
+python3 cat_tracker.py --install-deps-all   # add this if you use the PCA9685 servo
+```
+
+**5. (Optional) Headless: use OpenCV without a display**
+
+If you run over SSH or without a monitor:
+
+```bash
+pip uninstall opencv-python -y
+pip install opencv-python-headless
+```
+
+**6. YOLO model**
+
+The repo may include `yolo11s.pt` in the repo root (`~/cat/yolo11s.pt`). If not, download a YOLO model and put it there, or pass its path with `--model /path/to/model.pt`.
+
+**7. Run the tracker**
+
+With a monitor (and optional servo):
+
+```bash
+cd ~/cat/cat_tracker
+source venv/bin/activate
+python3 cat_tracker.py
+```
+
+Over SSH or headless (no window):
+
+```bash
+cd ~/cat/cat_tracker
+source venv/bin/activate
+python3 cat_tracker.py --no-window
+```
+
+Without the servo (camera + detection only):
+
+```bash
+python3 cat_tracker.py --no-servo --no-window
+```
+
+Press **Ctrl+C** to stop. To have it start when the Pi boots, see **[Run at boot](#8-run-at-boot-start-when-the-pi-turns-on)** below.
+
+---
+
+## Running on Raspberry Pi (detailed)
 
 ### 1. System setup
 
@@ -289,8 +379,9 @@ python3 cat_tracker.py --no-window
 |--------|-------------|
 | `--install-deps` | Install required packages (opencv-python, ultralytics). |
 | `--install-deps-all` | Install required + optional (Adafruit servo) packages. |
-| `--no-servo` | Disable servo; detection and bounding boxes only. |
-| `--no-window` | Don’t open the OpenCV window (for headless/SSH). |
+| `--no-servo` | Disable servo; detection and bounding boxes only. (Use full flag, not `--no`.) |
+| `--no-window` | Don't open the OpenCV window (for headless/SSH). (Use full flag, not `--no`.) |
+| `--min-width`, `--min-height` | Min box size (px) to track; default 50×50. |
 | `--camera 0` | Camera index (default 0). |
 | `--model path/to/yolo11s.pt` | YOLO model path (default: repo root `yolo11s.pt`). |
 | `--gain 0.4` | Tracking gain; higher = servos react faster. |
@@ -298,10 +389,35 @@ python3 cat_tracker.py --no-window
 
 Press **q** in the window to quit (or **Ctrl+C** in the terminal if using `--no-window`).
 
+## Troubleshooting
+
+**"Ambiguous option: --no could match --no-servo, --no-window"**  
+Use the **full** flag: `--no-window` or `--no-servo`, not `--no`.
+
+**Servo not tracking**  
+If the servo doesn’t follow you (or the cat), check: (1) You’re not using `--no-servo`. (2) Minimum box size: the default is 50×50 px. If you previously raised `--min-width` / `--min-height` (e.g. to 1000×700), only very large, close-up detections are tracked; lower them or omit them to track normal-sized people. (3) I2C is enabled and the PCA9685 is wired correctly.
+
+**"Could not find the Qt platform plugin wayland"**  
+This happens when OpenCV (with Qt) tries to open a window but your environment doesn’t have the Wayland Qt plugin (common on Raspberry Pi or over SSH).
+
+- **Option 1 — Run without a window (recommended):**  
+  ```bash
+  python3 cat_tracker.py --no-window
+  ```  
+  The script sets `QT_QPA_PLATFORM=offscreen` when you use `--no-window`, so Qt doesn’t try to load wayland and the error goes away. Tracking still runs; you just don’t see the video window.
+
+- **Option 2 — Use headless OpenCV (no Qt at all):**  
+  ```bash
+  pip uninstall opencv-python -y
+  pip install opencv-python-headless
+  ```  
+  Then run with `--no-window` (you can’t show a window with the headless build). This avoids Qt entirely.
+
 ## Configuration
 
 All config lives in `cat_tracker.py`. Edit the constants near the top if needed:
 
+- **GPIO / wiring:** The PCA9685 uses **I2C**: Pi **GPIO 2 (SDA)** and **GPIO 3 (SCL)** plus 3.3 V and GND. See the [GPIO pins table](#gpio-pins-for-pca9685-servo-board) in the Raspberry Pi section.
 - **Servo ports:** `PAN_SERVO_PORT`, `TILT_SERVO_PORT` — Indices (0 = pan, 1 = tilt for typical Arducam).
 - **Angle limits:** `PAN_RANGE`, `TILT_RANGE` — Min/max angles for your mount.
 - **Tracking:** `GAIN` (how fast servos follow), `DEADZONE` (ignore small center errors).

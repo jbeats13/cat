@@ -17,6 +17,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import subprocess
 import sys
 import time
@@ -98,6 +99,8 @@ PAN_RANGE = (30, 150)   # Min/max pan angle
 TILT_RANGE = (50, 130)  # Min/max tilt angle
 GAIN = 0.4              # How aggressively to move (0.1 = slow, 0.8 = fast)
 DEADZONE = 0.05         # Ignore small errors (fraction of frame)
+MIN_TRACK_WIDTH = 50   # Don't track if bounding box width (px) is smaller (raise to ignore distant targets)
+MIN_TRACK_HEIGHT = 50  # Don't track if bounding box height (px) is smaller
 WINDOW_NAME = "Cat & Person Tracker"
 
 
@@ -115,7 +118,7 @@ def get_class_ids(model, class_names: list[str]) -> list[int]:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Track cats and/or people with camera and servo")
+    parser = argparse.ArgumentParser(description="Track cats and/or people with camera and servo", allow_abbrev=False)
     parser.add_argument("--install-deps", action="store_true", help="Install required Python packages (run once)")
     parser.add_argument("--install-deps-all", action="store_true", help="Install required + optional (servo) packages")
     parser.add_argument("--no-servo", action="store_true", help="Run without servo (camera + detection only)")
@@ -128,7 +131,9 @@ def main():
         default="cat,person",
         help="Comma-separated classes to track: cat, person (default: cat,person)",
     )
-    parser.add_argument("--no-window", action="store_true", help="Do not show OpenCV window")
+    parser.add_argument("--no-window", action="store_true", help="Do not show OpenCV window (use full flag, not --no)")
+    parser.add_argument("--min-width", type=int, default=MIN_TRACK_WIDTH, help="Min box width (px) to track (default %s)" % MIN_TRACK_WIDTH)
+    parser.add_argument("--min-height", type=int, default=MIN_TRACK_HEIGHT, help="Min box height (px) to track (default %s)" % MIN_TRACK_HEIGHT)
     args = parser.parse_args()
 
     if args.install_deps:
@@ -137,6 +142,10 @@ def main():
     if args.install_deps_all:
         install_deps(include_optional=True)
         return
+
+    # Avoid Qt "wayland" plugin errors when running without a display (e.g. SSH, headless)
+    if args.no_window:
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
     import cv2
     from ultralytics import YOLO
@@ -202,19 +211,25 @@ def main():
                     if len(row) < 4:
                         continue
                     x1, y1, x2, y2 = map(int, row[:4])
-                    area = (x2 - x1) * (y2 - y1)
+                    w_px = x2 - x1
+                    h_px = y2 - y1
+                    area = w_px * h_px
                     cls_id = int(row[6]) if len(row) >= 7 else int(row[5]) if len(row) >= 6 else 0
                     conf = float(row[5]) if len(row) >= 6 else 0.0
                     label = names.get(cls_id, "?")
-                    if area > best_area:
+                    # Only consider for tracking if box is at least min_width x min_height
+                    if w_px >= args.min_width and h_px >= args.min_height and area > best_area:
                         best_area = area
                         best_cx = (x1 + x2) / 2.0
                         best_cy = (y1 + y2) / 2.0
                         best_label = label
                     detections_for_draw.append((x1, y1, x2, y2, label, conf, area))
 
-            # Draw bounding boxes (tracked target = green, others = orange)
+            # Draw bounding boxes (tracked target = green, others = orange); show dimensions
             for (x1, y1, x2, y2, label, conf, area) in detections_for_draw:
+                w_px = x2 - x1
+                h_px = y2 - y1
+                dims = "%dx%d" % (w_px, h_px)
                 cx, cy = (x1 + x2) / 2.0, (y1 + y2) / 2.0
                 is_tracked = (
                     best_cx is not None
@@ -224,15 +239,17 @@ def main():
                 if is_tracked:
                     color = (0, 255, 0)
                     thickness = 3
-                    box_label = "%s (tracking)" % label
+                    box_label = "%s (tracking) %s" % (label, dims)
                 else:
                     color = (0, 165, 255)
                     thickness = 2
-                    box_label = "%s %.0f%%" % (label, conf * 100)
+                    box_label = "%s %.0f%% %s" % (label, conf * 100, dims)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), color, thickness)
                 (tw, th), _ = cv2.getTextSize(box_label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)
                 cv2.rectangle(frame, (x1, y1 - th - 8), (x1 + tw + 4, y1), color, -1)
                 cv2.putText(frame, box_label, (x1 + 2, y1 - 4), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 0), 1)
+                # Dimensions below the box (width x height in pixels)
+                cv2.putText(frame, dims, (x1, y2 + 16), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
 
             if best_cx is not None and servo:
                 # Normalized error from center (-1..1)
