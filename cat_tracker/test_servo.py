@@ -38,8 +38,9 @@ def get_servo(mock: bool):
     try:
         import adafruit_servokit
     except ImportError:
-        print("adafruit_servokit not found. Install with:")
-        print("  pip install adafruit-circuitpython-servokit adafruit-circuitpython-pca9685 adafruit-blinka")
+        print("adafruit_servokit not found. Install with (venv must be active):")
+        print("  python3 -m pip install adafruit-circuitpython-servokit adafruit-circuitpython-pca9685 adafruit-blinka")
+        print("  # or: python3 cat_tracker.py --install-deps-all")
         print("Or run with --mock to test without hardware.")
         sys.exit(1)
     kit = adafruit_servokit.ServoKit(channels=16)

@@ -29,6 +29,42 @@ You need a YOLO model (e.g. `yolo11s.pt`) in the repo root; the script looks for
 
 ---
 
+## Test the servos first (optional)
+
+If you have a Raspberry Pi and a PCA9685 pan/tilt board, you can test the servos **before** setting up the full cat tracker. That confirms wiring and I2C.
+
+**1. Enable I2C:** `sudo raspi-config` → Interface Options → I2C → Enable, then reboot.
+
+**2. Wire the PCA9685** to the Pi (see [GPIO pins table](#gpio-pins-for-pca9685-servo-board) in the section below). Use GPIO 2 (SDA), GPIO 3 (SCL), 3.3 V, and GND.
+
+**3. Clone the repo** (if you haven’t already):
+
+```bash
+cd ~
+git clone https://github.com/jbeats13/cat.git
+cd cat/cat_tracker
+```
+
+**4. Create a venv and install the servo libraries:**
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+python3 cat_tracker.py --install-deps-all
+```
+
+**5. Run the servo test:**
+
+```bash
+python3 test_servo.py              # Sweep until Ctrl+C
+python3 test_servo.py --once      # Sweep once and exit
+python3 test_servo.py --mock      # No hardware; print angles only (no Adafruit libs needed)
+```
+
+If you see **"adafruit_servokit not found"**, run `python3 -m pip install adafruit-circuitpython-servokit adafruit-circuitpython-pca9685 adafruit-blinka` in the same venv, or use `--mock`. To check if the Pi sees the board: `sudo apt install -y i2c-tools` then `sudo i2cdetect -y 1`; you should see **40** in the grid.
+
+---
+
 ## Get it from GitHub and run on Raspberry Pi
 
 End-to-end steps to clone the repo on a Pi and run the tracker.
@@ -62,7 +98,7 @@ The PCA9685 connects over **I2C**. On the Raspberry Pi 40-pin header, use:
 
 So you only use **GPIO 2 (SDA)** and **GPIO 3 (SCL)** for data; the rest is 3.3 V and GND. The servos plug into the PCA9685 board, not into the Pi. (If your board uses 5 V for logic, connect VCC to Pi pin 2 or 4 (5 V) instead of 3.3 V — check your PCA9685 module.)
 
-To **test the servos** without the full tracker: `python3 test_servo.py` (sweeps pan and tilt; use `--once` to run once and exit, or `--mock` to print angles only).
+To **test the servos** before running the full tracker, see [Test the servos first (optional)](#test-the-servos-first-optional) above.
 
 **3. Install Python and create a virtualenv**
 
@@ -126,6 +162,15 @@ Press **Ctrl+C** to stop. To start at boot, see **[Run at boot](#run-at-boot-sta
 **Camera:** USB webcam is usually `--camera 0`. Pi Camera (CSI) with libcamera/V4L2 may also appear as `/dev/video0`. The script expects an OpenCV `VideoCapture` index.
 
 **I2C check:** After enabling I2C and rebooting, run `ls /dev/i2c*`; you should see `/dev/i2c-1`.
+
+**Check if the Pi sees the PCA9685 (servo board):** With the board wired and powered, run:
+
+```bash
+sudo apt install -y i2c-tools
+sudo i2cdetect -y 1
+```
+
+If the PCA9685 is connected correctly, you’ll see **40** in the grid (its default I2C address). If the row for `40` is empty or you get errors, check wiring (SDA, SCL, VCC, GND) and that I2C is enabled in `raspi-config`.
 
 ### Performance on Pi
 
@@ -282,6 +327,9 @@ source venv/bin/activate
 
 **"Ambiguous option: --no could match --no-servo, --no-window"**  
 Use the **full** flag: `--no-window` or `--no-servo`, not `--no`.
+
+**"adafruit_servokit not found" when running `test_servo.py`**  
+Install the servo libraries in your venv: `python3 cat_tracker.py --install-deps-all`. Or run `python3 test_servo.py --mock` to test without hardware (no Adafruit libs needed). See [Test the servos first (optional)](#test-the-servos-first-optional).
 
 **Servo not tracking**  
 If the servo doesn’t follow you (or the cat), check: (1) You’re not using `--no-servo`. (2) Minimum box size: the default is 50×50 px. If you previously raised `--min-width` / `--min-height` (e.g. to 1000×700), only very large, close-up detections are tracked; lower them or omit them to track normal-sized people. (3) I2C is enabled and the PCA9685 is wired correctly.
