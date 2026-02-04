@@ -72,6 +72,26 @@ or install directly with pip (use the same Python you run the script with):
 
 On Mac/laptop you can skip the servo packages and run with `--no-servo` later.
 
+**If you use a Raspberry Pi camera (e.g. imx708) with `--camera-backend picamera2`**, install picamera2 in the same venv:
+
+```bash
+pip install picamera2
+```
+
+Install system deps if needed: `sudo apt install -y libcap-dev` (for building), then `sudo apt install -y python3-libcamera`. Because `libcamera` is a system package, the venv must see it. **Find the correct path** (run once on your Pi):
+
+```bash
+dpkg -L python3-libcamera | grep 'dist-packages' | head -1
+```
+
+Use that directory in `PYTHONPATH`. Common results: `/usr/lib/python3/dist-packages` or `/usr/lib/python3.12/dist-packages`. Example:
+
+```bash
+PYTHONPATH="/usr/lib/python3/dist-packages:$PYTHONPATH" python3 cat_tracker.py --no-window --conf 0.25 --camera-backend picamera2
+```
+
+**Easier long-term:** recreate the venv with system site-packages so it sees `libcamera` without `PYTHONPATH` (see [Troubleshooting](#troubleshooting)).
+
 ### 4. (Raspberry Pi + servo only) Enable I2C and wire the board
 
 - **Enable I2C:** `sudo raspi-config` → Interface Options → I2C → Enable → Finish, then **reboot**.
@@ -276,6 +296,8 @@ Press **Ctrl+C** to stop. To start at boot, see **[Run at boot](#run-at-boot-sta
 
 **Camera:** You can pass an index or a device path: `--camera 0`, `--camera 2`, or `--camera /dev/video0`. On Pi there are often many `/dev/video*` nodes; OpenCV’s index 0 might not be the real capture device. If you get “Camera read failed” or “Not a video capture device”, run `v4l2-ctl --list-devices` and try the index or path for the capture device. **Raspberry Pi camera (e.g. imx708)** that doesn’t work with OpenCV: install `picamera2` and run with `--camera-backend picamera2` (e.g. `python3 cat_tracker.py --no-window --camera-backend picamera2`).
 
+**IMX708 (Camera Module 3 / Arducam 12MP):** The IMX708 is supported by libcamera and Picamera2. If the camera isn't detected at all, see [Arducam's IMX708 setup](https://docs.arducam.com/Raspberry-Pi-Camera/Native-camera/12MP-IMX708/) (config.txt: `camera_auto_detect=0`, `dtoverlay=imx708`, then reboot). Once `rpicam-still --list-cameras` shows the camera, use this tracker with `--camera-backend picamera2` and ensure the venv can see the system `libcamera` package (PYTHONPATH or venv with `--system-site-packages`; see §3 and Troubleshooting).
+
 **I2C check:** After enabling I2C and rebooting, run `ls /dev/i2c*`; you should see `/dev/i2c-1`.
 
 **Check if the Pi sees the PCA9685 (servo board):** With the board wired and powered, run:
@@ -443,6 +465,21 @@ source venv/bin/activate
 
 **"Ambiguous option: --no could match --no-servo, --no-window"**  
 Use the **full** flag: `--no-window` or `--no-servo`, not `--no`.
+
+**"No module named 'libcamera'" when using `--camera-backend picamera2`**  
+The venv can’t see the system `libcamera` package. Either find the right path and set `PYTHONPATH` (see Pi camera step in §3), or **recreate the venv with system site-packages** so it sees system packages:
+
+```bash
+cd ~/cat/cat_tracker
+deactivate
+rm -rf venv
+python3 -m venv venv --system-site-packages
+source venv/bin/activate
+pip install opencv-python ultralytics picamera2
+python3 cat_tracker.py --no-window --conf 0.25 --camera-backend picamera2
+```
+
+Use the same `python3` that will run the script (e.g. system Python 3.11/3.12). Then the venv sees both pip packages and system `libcamera`.
 
 **"No module named 'lgpio'"**  
 On Raspberry Pi (especially Pi 5), Adafruit Blinka needs **lgpio**. With the venv active, run: `./venv/bin/python3 -m pip install lgpio`, then try the import or `test_servo.py` again.

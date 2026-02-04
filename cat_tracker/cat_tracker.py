@@ -108,8 +108,12 @@ class _Picamera2Capture:
     def read(self):
         import cv2
         arr = self._picam2.capture_array()
-        if arr.ndim == 3 and arr.shape[2] == 3:
-            arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+        if arr.ndim == 3:
+            if arr.shape[2] == 4:
+                # XBGR8888 from libcamera: drop leading channel -> BGR for YOLO
+                arr = arr[:, :, 1:4].copy()
+            elif arr.shape[2] == 3:
+                arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
         return (True, arr)
 
     def release(self):
