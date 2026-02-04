@@ -182,6 +182,10 @@ def main():
     parser.add_argument("--debug", action="store_true", help="Print detection count and servo angles every 20 frames (for troubleshooting)")
     parser.add_argument("--invert-pan", action="store_true", help="Reverse pan direction (if camera moves wrong way)")
     parser.add_argument("--invert-tilt", action="store_true", help="Reverse tilt direction (if camera moves wrong way)")
+    parser.add_argument("--width", type=int, default=640, help="Camera frame width (default 640); lower = higher FPS, e.g. 416")
+    parser.add_argument("--height", type=int, default=480, help="Camera frame height (default 480); lower = higher FPS, e.g. 320")
+    parser.add_argument("--scan-step", type=float, default=SCAN_STEP, help="Pan degrees per frame when scanning (default %.1f); lower = smoother, e.g. 0.5 or 1.0" % SCAN_STEP)
+    parser.add_argument("--headless-sleep", type=float, default=0.01, help="Seconds to sleep per frame when --no-window (default 0.01); 0 = max FPS", metavar="SECS")
     args = parser.parse_args()
 
     if args.install_deps:
@@ -266,21 +270,25 @@ def main():
     # Open camera: OpenCV and/or Picamera2 (Pi camera e.g. imx708)
     cap = None
     camera_label = args.camera
+    cam_size = (args.width, args.height)
     if args.camera_backend == "picamera2":
         try:
-            cap = _Picamera2Capture(size=(640, 480))
+            cap = _Picamera2Capture(size=cam_size)
             camera_label = "picamera2 (Pi camera)"
         except Exception as e:
             raise SystemError("Failed to open Picamera2: %s. Install: pip install picamera2 (on Raspberry Pi OS)." % e)
     else:
         camera_arg = int(args.camera) if args.camera.isdigit() else args.camera
         cap = cv2.VideoCapture(camera_arg)
+        if cap.isOpened():
+            cap.set(cv2.CAP_PROP_FRAME_WIDTH, args.width)
+            cap.set(cv2.CAP_PROP_FRAME_HEIGHT, args.height)
         if not cap.isOpened():
             if args.camera_backend == "opencv":
                 raise SystemError("Failed to open camera %s. Try --camera 0 or /dev/video0 (see README)." % args.camera)
             # auto: try Picamera2 as fallback (e.g. Pi camera not exposed as /dev/video*)
             try:
-                cap = _Picamera2Capture(size=(640, 480))
+                cap = _Picamera2Capture(size=cam_size)
                 camera_label = "picamera2 (OpenCV failed, using Pi camera)"
             except Exception as e:
                 raise SystemError(
@@ -440,7 +448,7 @@ def main():
                     # Start scanning only after no target for several frames (avoids flicker)
                     if frames_no_target >= SCAN_START_FRAMES:
                         # No target: scan pan left and right
-                        pan_angle = pan_angle + scan_direction * SCAN_STEP
+                        pan_angle = pan_angle + scan_direction * args.scan_step
                         if pan_angle >= PAN_RANGE[1]:
                             pan_angle = float(PAN_RANGE[1])
                             scan_direction = -1
@@ -491,7 +499,8 @@ def main():
                 if (cv2.waitKey(1) & 0xFF) == ord("q"):
                     break
             else:
-                time.sleep(0.03)
+                if args.headless_sleep > 0:
+                    time.sleep(args.headless_sleep)
     finally:
         cap.release()
         if servo:
