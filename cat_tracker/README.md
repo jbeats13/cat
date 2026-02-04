@@ -29,6 +29,109 @@ You need a YOLO model (e.g. `yolo11s.pt`) in the repo root; the script looks for
 
 ---
 
+## From the beginning: full setup walkthrough
+
+Follow these steps in order. Use **Raspberry Pi** if you have the servo board; use **Mac/laptop** if you only want to try detection (no servo).
+
+### 1. Get the code
+
+```bash
+cd ~
+git clone https://github.com/jbeats13/cat.git
+cd cat/cat_tracker
+```
+
+### 2. Create a virtual environment (same on Pi and Mac)
+
+```bash
+python3 -m venv venv
+source venv/bin/activate   # On Windows: venv\Scripts\activate
+```
+
+From here on, use this venv: either run `source venv/bin/activate` in each new terminal, or call the venv Python explicitly: `./venv/bin/python3 ...`.
+
+### 3. Install dependencies
+
+**Required** (camera + YOLO):
+
+```bash
+./venv/bin/python3 cat_tracker.py --install-deps
+```
+
+**If you have a Raspberry Pi and a PCA9685 servo board**, also install the optional servo packages (includes `lgpio` for Pi). Either:
+
+```bash
+./venv/bin/python3 cat_tracker.py --install-deps-all
+```
+
+or install directly with pip (use the same Python you run the script with):
+
+```bash
+./venv/bin/python3 -m pip install lgpio adafruit-circuitpython-servokit adafruit-circuitpython-pca9685 adafruit-blinka
+```
+
+On Mac/laptop you can skip the servo packages and run with `--no-servo` later.
+
+### 4. (Raspberry Pi + servo only) Enable I2C and wire the board
+
+- **Enable I2C:** `sudo raspi-config` → Interface Options → I2C → Enable → Finish, then **reboot**.
+- **Wire PCA9685:** SDA → Pi GPIO 2 (pin 3), SCL → Pi GPIO 3 (pin 5), VCC → 3.3 V (pin 1), GND → GND (pin 6). Servos plug into the PCA9685, not the Pi.
+- **Check the Pi sees the board:**  
+  `sudo apt install -y i2c-tools` then `sudo i2cdetect -y 1` — you should see **40** in the grid.
+
+### 5. (Optional) Test the servos before the full tracker (Pi + servo)
+
+```bash
+./venv/bin/python3 test_servo.py --once
+```
+
+If the servos sweep once and return to center, wiring and I2C are good. If you get "No I2C device at 0x40" or "No module named 'lgpio'", see [Troubleshooting](#troubleshooting) below.
+
+### 6. YOLO model
+
+The script looks for a YOLO model named `yolo11s.pt` in the **repo root** (`~/cat/yolo11s.pt` when you cloned into `~/cat`). If the repo doesn’t include it, the first run may download it automatically (Ultralytics can do this), or you can download a small model and put it there. You can also pass a path: `--model /path/to/model.pt`.
+
+### 7. Run the tracker
+
+**With a display (and optional servo):**
+
+```bash
+cd ~/cat/cat_tracker
+source venv/bin/activate
+python3 cat_tracker.py
+```
+
+You should see a line like: `Servo: PCA9685 | Camera: 0 | Track: cat,person`. If it says `Servo: mock (...)`, the real servo driver didn’t load — run `--install-deps-all` and fix any import errors (see Troubleshooting).
+
+**Over SSH or no monitor (headless):**
+
+```bash
+pip uninstall opencv-python -y
+pip install opencv-python-headless
+python3 cat_tracker.py --no-window
+```
+
+**Without the servo** (e.g. on a laptop, or to test detection only):
+
+```bash
+python3 cat_tracker.py --no-servo
+```
+
+Press **Q** in the window to quit, or **Ctrl+C** in the terminal.
+
+### 8. Quick checks if something’s wrong
+
+| What you see | What to do |
+|--------------|------------|
+| `Servo: mock (import failed)` | Run `./venv/bin/python3 cat_tracker.py --install-deps-all`. On Pi, ensure `lgpio` is installed (it’s in the optional list now). |
+| `No I2C device at address: 0x40` | Enable I2C in `raspi-config`, reboot, run `i2cdetect -y 1` and check wiring (SDA/SCL/VCC/GND). |
+| Camera doesn’t open / black window | Try `--camera 0` or `--camera 1`. On Pi, ensure the camera is enabled and recognized. |
+| No detections / “Target: none” | Point camera at a cat or person; ensure the model supports those classes (default model does). You can lower `--min-width` and `--min-height` if the target is small. |
+
+More detail: [Troubleshooting](#troubleshooting) and [Get it from GitHub and run on Raspberry Pi](#get-it-from-github-and-run-on-raspberry-pi).
+
+---
+
 ## Test the servos first (optional)
 
 If you have a Raspberry Pi and a PCA9685 pan/tilt board, you can test the servos **before** setting up the full cat tracker. That confirms wiring and I2C.
@@ -50,7 +153,10 @@ cd cat/cat_tracker
 ```bash
 python3 -m venv venv
 source venv/bin/activate
-python3 cat_tracker.py --install-deps-all
+# Install lgpio + Adafruit libs (lgpio needed on Raspberry Pi for Blinka):
+./venv/bin/python3 -m pip install lgpio adafruit-circuitpython-servokit adafruit-circuitpython-pca9685 adafruit-blinka
+# Check they’re there:
+./venv/bin/python3 -c "import adafruit_servokit; print('OK')"
 ```
 
 **5. Run the servo test:**
@@ -61,13 +167,13 @@ python3 test_servo.py --once      # Sweep once and exit
 python3 test_servo.py --mock      # No hardware; print angles only (no Adafruit libs needed)
 ```
 
-If you see **"adafruit_servokit not found"**, the Adafruit libraries aren’t in your venv yet. These are the same packages the Arducam pan-tilt examples use (see `PCA9685/example/Jetson/ServoKit.py`). With the venv active, run:
+If you see **"adafruit_servokit not found"**, the Adafruit libraries aren’t in your venv yet. These are the same packages the Arducam pan-tilt examples use (see `PCA9685/example/Jetson/ServoKit.py`). Install using the same Python you run the script with:
 
 ```bash
-python3 -m pip install adafruit-circuitpython-servokit adafruit-circuitpython-pca9685 adafruit-blinka
+./venv/bin/python3 -m pip install lgpio adafruit-circuitpython-servokit adafruit-circuitpython-pca9685 adafruit-blinka
 ```
 
-Then run `python3 test_servo.py --once` again. To confirm the install: `python3 -c "import adafruit_servokit; print('OK')"`. Or use `--mock` to test without hardware.
+Then run `./venv/bin/python3 test_servo.py --once` again. (With the venv activated you can use `python3` instead.) On Raspberry Pi 5, **lgpio** is required by Adafruit Blinka; if you see **"No module named 'lgpio'"**, install it with that command. To confirm the install: `python3 -c "import adafruit_servokit; print('OK')"`. Or use `--mock` to test without hardware.
 
 To check if the Pi sees the board: `sudo apt install -y i2c-tools` then `sudo i2cdetect -y 1`; you should see **40** in the grid.
 
@@ -336,8 +442,32 @@ source venv/bin/activate
 **"Ambiguous option: --no could match --no-servo, --no-window"**  
 Use the **full** flag: `--no-window` or `--no-servo`, not `--no`.
 
+**"No module named 'lgpio'"**  
+On Raspberry Pi (especially Pi 5), Adafruit Blinka needs **lgpio**. With the venv active, run: `./venv/bin/python3 -m pip install lgpio`, then try the import or `test_servo.py` again.
+
+**"Building wheel for lgpio" failed**  
+The Python **lgpio** package needs the system **lgpio** library and build tools. On Raspberry Pi, install them, then install the Python package in the venv:
+
+```bash
+sudo apt install -y swig build-essential liblgpio-dev
+./venv/bin/python3 -m pip install lgpio
+```
+
+If your system doesn’t have **liblgpio-dev**, try `sudo apt install -y lgpio` (or search: `apt search lgpio`), then retry the pip install.
+
 **"adafruit_servokit not found" when running `test_servo.py`**  
-Install into the **same** Python that runs the script: run `python3 test_servo.py --install` (installs into that Python, then run `test_servo.py` again). Or run `python3 -m pip install adafruit-circuitpython-servokit adafruit-circuitpython-pca9685 adafruit-blinka` with the venv active. If it still fails: run `which python3` and `python3 -m pip list | grep -i adafruit` to confirm you’re in the venv and packages are there; or run `./venv/bin/python3 test_servo.py --install` then `./venv/bin/python3 test_servo.py --once` so the same interpreter is used. Or use `--mock` to test without hardware.
+Install into the **same** Python that runs the script: run `python3 test_servo.py --install` (installs into that Python, then run `test_servo.py` again). Or run `python3 -m pip install lgpio adafruit-circuitpython-servokit adafruit-circuitpython-pca9685 adafruit-blinka` with the venv active. If it still fails: run `which python3` and `python3 -m pip list | grep -i adafruit` to confirm you’re in the venv and packages are there; or run `./venv/bin/python3 test_servo.py --install` then `./venv/bin/python3 test_servo.py --once` so the same interpreter is used. Or use `--mock` to test without hardware.
+
+**"No I2C device at address: 0x40" / "Remote I/O error" when running `test_servo.py`**  
+The Pi can’t talk to the PCA9685. Check:
+
+1. **Device on bus:** Run `sudo i2cdetect -y 1` again. You should see **40** in the grid. If not, the board isn’t seen (check wiring and power).
+2. **I2C permission:** Your user must be in the **i2c** group so Python can use I2C without sudo:
+   ```bash
+   sudo usermod -aG i2c $USER
+   ```
+   Then **log out and log back in** (or reboot). After that, run `test_servo.py` again (no sudo).
+3. **Wiring and power:** SDA→GPIO 2 (pin 3), SCL→GPIO 3 (pin 5), VCC→3.3 V, GND→GND. Ensure the PCA9685 is powered and cables are secure.
 
 **Servo not tracking**  
 If the servo doesn’t follow you (or the cat), check: (1) You’re not using `--no-servo`. (2) Minimum box size: the default is 50×50 px. If you previously raised `--min-width` / `--min-height` (e.g. to 1000×700), only very large, close-up detections are tracked; lower them or omit them to track normal-sized people. (3) I2C is enabled and the PCA9685 is wired correctly.

@@ -29,6 +29,7 @@ REQUIRED_PACKAGES = [
     "ultralytics>=8.0.0",
 ]
 OPTIONAL_PACKAGES = [
+    "lgpio",  # Required by adafruit_blinka on Raspberry Pi (install first)
     "adafruit-circuitpython-servokit",
     "adafruit-circuitpython-pca9685",
     "adafruit-blinka",
@@ -65,11 +66,14 @@ class _MockServo:
 
 def _create_servo_driver(use_servo: bool = True, num_ports: int = 4):
     if not use_servo:
-        return _MockServo(num_ports=num_ports)
+        return _MockServo(num_ports=num_ports), "mock (--no-servo)"
     try:
         import adafruit_servokit
-    except ImportError:
-        return _MockServo(num_ports=num_ports)
+    except ImportError as e:
+        print("Warning: Servo hardware disabled — could not import adafruit_servokit: %s" % e)
+        print("  Install with: python3 cat_tracker.py --install-deps-all")
+        print("  Or: pip install lgpio adafruit-circuitpython-servokit adafruit-circuitpython-pca9685 adafruit-blinka")
+        return _MockServo(num_ports=num_ports), "mock (import failed)"
 
     class _PCA9685Servo:
         def __init__(self) -> None:
@@ -84,7 +88,7 @@ def _create_servo_driver(use_servo: bool = True, num_ports: int = 4):
         def get_angle(self, port: int) -> int | float:
             return self._kit.servo[port].angle or 90
 
-    return _PCA9685Servo()
+    return _PCA9685Servo(), "PCA9685"
 
 # --- Config (override with CLI) ---
 MODEL_FILE = "yolo11s.pt"  # Path relative to repo root or cwd
@@ -167,7 +171,8 @@ def main():
     if not cap.isOpened():
         raise SystemError("Failed to open camera (index %s)." % args.camera)
 
-    servo = _create_servo_driver(use_servo=not args.no_servo, num_ports=4)
+    servo, servo_label = _create_servo_driver(use_servo=not args.no_servo, num_ports=4)
+    print("Servo: %s | Camera: %d | Track: %s" % (servo_label, args.camera, ",".join(track_classes)))
     if servo:
         servo.set_angle(PAN_SERVO_PORT, PAN_CENTER)
         servo.set_angle(TILT_SERVO_PORT, TILT_CENTER)
@@ -287,14 +292,18 @@ def main():
 
             if not args.no_window:
                 cv2.imshow(WINDOW_NAME, frame)
-            if (cv2.waitKey(1) & 0xFF) == ord("q"):
-                break
+                if (cv2.waitKey(1) & 0xFF) == ord("q"):
+                    break
+            else:
+                # Headless: no GUI; use short sleep and rely on Ctrl+C to exit
+                time.sleep(0.03)
     finally:
         cap.release()
         if servo:
             servo.set_angle(PAN_SERVO_PORT, PAN_CENTER)
             servo.set_angle(TILT_SERVO_PORT, TILT_CENTER)
-        cv2.destroyAllWindows()
+        if not args.no_window:
+            cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":

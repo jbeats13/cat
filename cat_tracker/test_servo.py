@@ -40,8 +40,8 @@ def get_servo(mock: bool):
         import adafruit_servokit
     except ImportError:
         print("adafruit_servokit not found.")
-        print("Run: python3 test_servo.py --install   (installs into this Python, then try again)")
-        print("Or:  python3 -m pip install adafruit-circuitpython-servokit adafruit-circuitpython-pca9685 adafruit-blinka")
+        print("Run:  %s test_servo.py --install   (installs into this Python, then try again)" % sys.executable)
+        print("Or:  %s -m pip install lgpio adafruit-circuitpython-servokit adafruit-circuitpython-pca9685 adafruit-blinka" % sys.executable)
         print("Or:  python3 test_servo.py --mock     (test without hardware)")
         sys.exit(1)
     kit = adafruit_servokit.ServoKit(channels=16)
@@ -64,6 +64,7 @@ def main():
 
     if args.install:
         pkgs = [
+            "lgpio",  # Required by adafruit_blinka on Raspberry Pi
             "adafruit-circuitpython-servokit",
             "adafruit-circuitpython-pca9685",
             "adafruit-blinka",
