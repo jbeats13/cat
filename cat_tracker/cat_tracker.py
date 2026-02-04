@@ -265,12 +265,18 @@ def main():
             print("(Window could not be opened; continuing without display.)", flush=True)
         frame_count = 0
         while cap.isOpened():
+            if frame_count == 0 and not show_window:
+                print("Reading first frame from camera...", flush=True)
             ok, frame = cap.read()
             if not ok:
+                if not show_window:
+                    print("Camera read failed (no frame). Check camera and --camera index.", flush=True)
                 break
             frame_count += 1
             if frame_count == 1 and not show_window:
-                print("First frame received. Running detection (may be slow on Pi)...", flush=True)
+                print("First frame OK. Running YOLO (first run can take 30-60s on Pi)...", flush=True)
+            if frame_count == 2 and not show_window:
+                print("Second frame done. Status will print every 2s.", flush=True)
 
             h, w = frame.shape[:2]
             center_x, center_y = w / 2.0, h / 2.0
@@ -320,6 +326,9 @@ def main():
                         best_cy = (y1 + y2) / 2.0
                         best_label = label
                     detections_for_draw.append((x1, y1, x2, y2, label, conf, area))
+
+            if frame_count == 1 and not show_window:
+                print("First inference done. Target: %s" % (best_label if best_label else "none"), flush=True)
 
             # Draw bounding boxes (tracked target = green, others = orange); show dimensions
             for (x1, y1, x2, y2, label, conf, area) in detections_for_draw:
