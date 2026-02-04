@@ -103,8 +103,8 @@ PAN_RANGE = (30, 150)   # Min/max pan angle
 TILT_RANGE = (50, 130)  # Min/max tilt angle
 GAIN = 0.4              # How aggressively to move (0.1 = slow, 0.8 = fast)
 DEADZONE = 0.05         # Ignore small errors (fraction of frame)
-MIN_TRACK_WIDTH = 50   # Don't track if bounding box width (px) is smaller (raise to ignore distant targets)
-MIN_TRACK_HEIGHT = 50  # Don't track if bounding box height (px) is smaller
+MIN_TRACK_WIDTH = 0   # Min box width (px) to track; 0 = any size
+MIN_TRACK_HEIGHT = 0  # Min box height (px) to track; 0 = any size
 WINDOW_NAME = "Cat & Person Tracker"
 
 
@@ -136,8 +136,8 @@ def main():
         help="Comma-separated classes to track: cat, person (default: cat,person)",
     )
     parser.add_argument("--no-window", action="store_true", help="Do not show OpenCV window (use full flag, not --no)")
-    parser.add_argument("--min-width", type=int, default=MIN_TRACK_WIDTH, help="Min box width (px) to track (default %s)" % MIN_TRACK_WIDTH)
-    parser.add_argument("--min-height", type=int, default=MIN_TRACK_HEIGHT, help="Min box height (px) to track (default %s)" % MIN_TRACK_HEIGHT)
+    parser.add_argument("--min-width", type=int, default=MIN_TRACK_WIDTH, help="Min box width (px) to track; 0 = any size (default %s)" % MIN_TRACK_WIDTH)
+    parser.add_argument("--min-height", type=int, default=MIN_TRACK_HEIGHT, help="Min box height (px) to track; 0 = any size (default %s)" % MIN_TRACK_HEIGHT)
     args = parser.parse_args()
 
     if args.install_deps:
@@ -221,11 +221,21 @@ def main():
                     w_px = x2 - x1
                     h_px = y2 - y1
                     area = w_px * h_px
-                    cls_id = int(row[6]) if len(row) >= 7 else int(row[5]) if len(row) >= 6 else 0
-                    conf = float(row[5]) if len(row) >= 6 else 0.0
+                    # 6 cols: xyxy, conf, cls → 7 cols: xyxy, track_id, conf, cls (Ultralytics Boxes)
+                    if len(row) >= 7:
+                        cls_id, conf = int(row[6]), float(row[5])
+                    elif len(row) >= 6:
+                        cls_id, conf = int(row[5]), float(row[4])
+                    else:
+                        cls_id, conf = 0, 0.0
                     label = names.get(cls_id, "?")
-                    # Only consider for tracking if box is at least min_width x min_height
-                    if w_px >= args.min_width and h_px >= args.min_height and area > best_area:
+                    # Only consider for tracking if class is one we want, and box is big enough
+                    if (
+                        cls_id in class_ids
+                        and w_px >= args.min_width
+                        and h_px >= args.min_height
+                        and area > best_area
+                    ):
                         best_area = area
                         best_cx = (x1 + x2) / 2.0
                         best_cy = (y1 + y2) / 2.0
