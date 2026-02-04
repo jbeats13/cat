@@ -125,7 +125,7 @@ Press **Q** in the window to quit, or **Ctrl+C** in the terminal.
 |--------------|------------|
 | `Servo: mock (import failed)` | Run `./venv/bin/python3 cat_tracker.py --install-deps-all`. On Pi, ensure `lgpio` is installed (it’s in the optional list now). |
 | `No I2C device at address: 0x40` | Enable I2C in `raspi-config`, reboot, run `i2cdetect -y 1` and check wiring (SDA/SCL/VCC/GND). |
-| Camera doesn’t open / black window | Try `--camera 0` or `--camera 1`. On Pi, ensure the camera is enabled and recognized. |
+| Camera doesn’t open / black window | Try `--camera 0`, `--camera 2`, or `--camera /dev/video0`. **Raspberry Pi camera (e.g. imx708):** if OpenCV fails on all `/dev/video*`, use the Pi camera backend: `pip install picamera2` then run with `--camera-backend picamera2`. On Pi, enable camera in raspi-config. |
 | No detections / “Target: none” | Point camera at a cat or person; ensure the model supports those classes (default model does). You can lower `--min-width` and `--min-height` if the target is small. |
 | **Servo works (test_servo) but tracking doesn’t move the camera** | Run `python3 cat_tracker.py --list-classes` and confirm you see `person` and `cat`. Then run with `--debug` to see `detections=N target=... pan=... tilt=...` every 20 frames. If `detections=0` or `target=none` while you’re in frame, lower the confidence: `--conf 0.25` or `--conf 0.2`. |
 
@@ -274,7 +274,7 @@ Press **Ctrl+C** to stop. To start at boot, see **[Run at boot](#run-at-boot-sta
 
 ## Raspberry Pi (extra detail)
 
-**Camera:** USB webcam is usually `--camera 0`. Pi Camera (CSI) with libcamera/V4L2 may also appear as `/dev/video0`. The script expects an OpenCV `VideoCapture` index.
+**Camera:** You can pass an index or a device path: `--camera 0`, `--camera 2`, or `--camera /dev/video0`. On Pi there are often many `/dev/video*` nodes; OpenCV’s index 0 might not be the real capture device. If you get “Camera read failed” or “Not a video capture device”, run `v4l2-ctl --list-devices` and try the index or path for the capture device. **Raspberry Pi camera (e.g. imx708)** that doesn’t work with OpenCV: install `picamera2` and run with `--camera-backend picamera2` (e.g. `python3 cat_tracker.py --no-window --camera-backend picamera2`).
 
 **I2C check:** After enabling I2C and rebooting, run `ls /dev/i2c*`; you should see `/dev/i2c-1`.
 
@@ -417,7 +417,8 @@ python3 cat_tracker.py --no-servo
 | `--no-servo` | Disable servo; detection and bounding boxes only. (Use full flag, not `--no`.) |
 | `--no-window` | Don't open the OpenCV window (for headless/SSH). (Use full flag, not `--no`.) |
 | `--min-width`, `--min-height` | Min box size (px) to track; default 50×50. |
-| `--camera 0` | Camera index (default 0). |
+| `--camera 0` or `--camera /dev/video0` | Camera index or device path (default 0). |
+| `--camera-backend auto \| opencv \| picamera2` | Use `picamera2` for Raspberry Pi camera (e.g. imx708) when OpenCV cannot open the device (default: auto). |
 | `--model path/to/yolo11s.pt` | YOLO model path (default: repo root `yolo11s.pt`). |
 | `--gain 0.4` | Tracking gain; higher = servos react faster. |
 | `--track cat,person` | Classes to track (default: cat,person). |

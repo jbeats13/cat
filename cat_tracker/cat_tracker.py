@@ -33,6 +33,7 @@ OPTIONAL_PACKAGES = [
     "adafruit-circuitpython-servokit",
     "adafruit-circuitpython-pca9685",
     "adafruit-blinka",
+    "picamera2",  # Raspberry Pi camera (e.g. imx708); use --camera-backend picamera2
 ]
 
 
@@ -90,6 +91,31 @@ def _create_servo_driver(use_servo: bool = True, num_ports: int = 4):
 
     return _PCA9685Servo(), "PCA9685"
 
+
+class _Picamera2Capture:
+    """Thin wrapper so Picamera2 can be used like cv2.VideoCapture in the main loop."""
+
+    def __init__(self, size=(640, 480)):
+        from picamera2 import Picamera2
+        self._picam2 = Picamera2()
+        config = self._picam2.create_video_configuration(main={"size": size})
+        self._picam2.configure(config)
+        self._picam2.start()
+
+    def isOpened(self):
+        return True
+
+    def read(self):
+        import cv2
+        arr = self._picam2.capture_array()
+        if arr.ndim == 3 and arr.shape[2] == 3:
+            arr = cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
+        return (True, arr)
+
+    def release(self):
+        self._picam2.stop()
+
+
 # --- Config (override with CLI) ---
 MODEL_FILE = "yolo11s.pt"  # Path relative to repo root or cwd
 CONF = 0.35
@@ -128,7 +154,14 @@ def main():
     parser.add_argument("--install-deps", action="store_true", help="Install required Python packages (run once)")
     parser.add_argument("--install-deps-all", action="store_true", help="Install required + optional (servo) packages")
     parser.add_argument("--no-servo", action="store_true", help="Run without servo (camera + detection only)")
-    parser.add_argument("--camera", type=int, default=0, help="Camera index (default 0)")
+    parser.add_argument("--camera", type=str, default="0", help="Camera index (0, 1, ...) or device path (e.g. /dev/video0); ignored if --camera-backend picamera2")
+    parser.add_argument(
+        "--camera-backend",
+        type=str,
+        choices=("auto", "opencv", "picamera2"),
+        default="auto",
+        help="Camera backend: auto (try OpenCV then Picamera2), opencv, or picamera2 for Raspberry Pi camera (e.g. imx708)",
+    )
     parser.add_argument("--model", type=str, default=MODEL_FILE, help="YOLO model path")
     parser.add_argument("--gain", type=float, default=GAIN, help="Tracking gain (default %s)" % GAIN)
     parser.add_argument(
@@ -226,14 +259,36 @@ def main():
     if not class_ids:
         raise SystemExit("No valid track classes. Use --track cat,person (or cat or person). Run with --list-classes to see this model's classes.")
 
-    cap = cv2.VideoCapture(args.camera)
-    if not cap.isOpened():
-        raise SystemError("Failed to open camera (index %s)." % args.camera)
+    # Open camera: OpenCV and/or Picamera2 (Pi camera e.g. imx708)
+    cap = None
+    camera_label = args.camera
+    if args.camera_backend == "picamera2":
+        try:
+            cap = _Picamera2Capture(size=(640, 480))
+            camera_label = "picamera2 (Pi camera)"
+        except Exception as e:
+            raise SystemError("Failed to open Picamera2: %s. Install: pip install picamera2 (on Raspberry Pi OS)." % e)
+    else:
+        camera_arg = int(args.camera) if args.camera.isdigit() else args.camera
+        cap = cv2.VideoCapture(camera_arg)
+        if not cap.isOpened():
+            if args.camera_backend == "opencv":
+                raise SystemError("Failed to open camera %s. Try --camera 0 or /dev/video0 (see README)." % args.camera)
+            # auto: try Picamera2 as fallback (e.g. Pi camera not exposed as /dev/video*)
+            try:
+                cap = _Picamera2Capture(size=(640, 480))
+                camera_label = "picamera2 (OpenCV failed, using Pi camera)"
+            except Exception as e:
+                raise SystemError(
+                    "Failed to open camera %s with OpenCV and Picamera2: %s. "
+                    "On Raspberry Pi with Pi camera try: --camera-backend picamera2" % (args.camera, e)
+                )
+    assert cap is not None
 
     servo, servo_label = _create_servo_driver(use_servo=not args.no_servo, num_ports=4)
     print("Model: %s" % model_path_str, flush=True)
     print("Tracking class IDs: %s" % ", ".join("%s (id %d)" % (model.names[i], i) for i in class_ids), flush=True)
-    print("Servo: %s | Camera: %d | Track: %s" % (servo_label, args.camera, ",".join(track_classes)), flush=True)
+    print("Servo: %s | Camera: %s | Track: %s" % (servo_label, camera_label, ",".join(track_classes)), flush=True)
     if args.no_window:
         print("Headless: FPS and target print every 10 frames. Ctrl+C to stop.", flush=True)
     if servo:

@@ -6,3 +6,6 @@ ultralytics>=8.0.0
 # adafruit-circuitpython-servokit
 # adafruit-circuitpython-pca9685
 # adafruit-blinka
+
+# Optional: for Raspberry Pi camera (e.g. imx708). Use --camera-backend picamera2 when OpenCV cannot open the camera.
+# pip install picamera2   # on Raspberry Pi OS
