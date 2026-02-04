@@ -172,7 +172,9 @@ def main():
         raise SystemError("Failed to open camera (index %s)." % args.camera)
 
     servo, servo_label = _create_servo_driver(use_servo=not args.no_servo, num_ports=4)
-    print("Servo: %s | Camera: %d | Track: %s" % (servo_label, args.camera, ",".join(track_classes)))
+    print("Servo: %s | Camera: %d | Track: %s" % (servo_label, args.camera, ",".join(track_classes)), flush=True)
+    if args.no_window:
+        print("Headless: FPS and target print every 10 frames. Ctrl+C to stop.", flush=True)
     if servo:
         servo.set_angle(PAN_SERVO_PORT, PAN_CENTER)
         servo.set_angle(TILT_SERVO_PORT, TILT_CENTER)
@@ -284,6 +286,8 @@ def main():
                 fps_display = fps_counter
                 fps_counter = 0
                 fps_timer = time.time()
+            if args.no_window and (fps_counter % 10 == 0 or fps_counter == 1):
+                print("FPS: %d | Target: %s" % (fps_display, best_label if best_label else "none"), flush=True)
             status = "FPS: %d | Target: %s" % (fps_display, best_label if best_label else "none")
             cv2.putText(
                 frame, status,
