@@ -152,9 +152,12 @@ def main():
         install_deps(include_optional=True)
         return
 
-    # Avoid Qt "wayland" plugin errors when running without a display (e.g. SSH, headless)
+    # Qt/OpenCV display: avoid Wayland plugin and font errors on Pi
     if args.no_window:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    else:
+        # Use X11 backend so we don't need the Qt "wayland" plugin (often missing in venv)
+        os.environ.setdefault("QT_QPA_PLATFORM", "xcb")
 
     import cv2
     from ultralytics import YOLO
