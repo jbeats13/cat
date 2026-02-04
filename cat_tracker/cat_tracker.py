@@ -103,6 +103,7 @@ PAN_RANGE = (30, 150)   # Min/max pan angle
 TILT_RANGE = (50, 130)  # Min/max tilt angle
 GAIN = 0.4              # How aggressively to move (0.1 = slow, 0.8 = fast)
 DEADZONE = 0.05         # Ignore small errors (fraction of frame)
+SCAN_STEP = 0.5         # Pan degrees per frame when no target (left-right scan)
 MIN_TRACK_WIDTH = 0   # Min box width (px) to track; 0 = any size
 MIN_TRACK_HEIGHT = 0  # Min box height (px) to track; 0 = any size
 WINDOW_NAME = "Cat & Person Tracker"
@@ -138,6 +139,7 @@ def main():
     parser.add_argument("--no-window", action="store_true", help="Do not show OpenCV window (use full flag, not --no)")
     parser.add_argument("--min-width", type=int, default=MIN_TRACK_WIDTH, help="Min box width (px) to track; 0 = any size (default %s)" % MIN_TRACK_WIDTH)
     parser.add_argument("--min-height", type=int, default=MIN_TRACK_HEIGHT, help="Min box height (px) to track; 0 = any size (default %s)" % MIN_TRACK_HEIGHT)
+    parser.add_argument("--list-classes", action="store_true", help="Load model, print its class names, and exit (to check if person/cat exist)")
     args = parser.parse_args()
 
     if args.install_deps:
@@ -161,17 +163,37 @@ def main():
             if p.exists():
                 model_path = p
                 break
-    model = YOLO(str(model_path), task="detect")
+    model_path_str = str(model_path)
+    if not Path(model_path_str).exists():
+        print("Note: model file not found at %s; YOLO may download it." % model_path_str, flush=True)
+    model = YOLO(model_path_str, task="detect")
     track_classes = [s.strip() for s in args.track.split(",") if s.strip()]
     class_ids = get_class_ids(model, track_classes)
+
+    if args.list_classes:
+        print("Model: %s" % model_path_str, flush=True)
+        print("Classes in this model:", flush=True)
+        for idx in sorted(model.names.keys()):
+            print("  %d: %s" % (idx, model.names[idx]), flush=True)
+        print("", flush=True)
+        print("Requested --track: %s" % ", ".join(track_classes), flush=True)
+        if class_ids:
+            resolved = [(i, model.names[i]) for i in class_ids]
+            print("Resolved to class IDs: %s" % ", ".join("%s (id %d)" % (name, i) for i, name in resolved), flush=True)
+        else:
+            print("WARNING: None of those names match this model. Check spelling and model (COCO has 'person' and 'cat').", flush=True)
+        return
+
     if not class_ids:
-        raise SystemExit("No valid track classes. Use --track cat,person (or cat or person).")
+        raise SystemExit("No valid track classes. Use --track cat,person (or cat or person). Run with --list-classes to see this model's classes.")
 
     cap = cv2.VideoCapture(args.camera)
     if not cap.isOpened():
         raise SystemError("Failed to open camera (index %s)." % args.camera)
 
     servo, servo_label = _create_servo_driver(use_servo=not args.no_servo, num_ports=4)
+    print("Model: %s" % model_path_str, flush=True)
+    print("Tracking class IDs: %s" % ", ".join("%s (id %d)" % (model.names[i], i) for i in class_ids), flush=True)
     print("Servo: %s | Camera: %d | Track: %s" % (servo_label, args.camera, ",".join(track_classes)), flush=True)
     if args.no_window:
         print("Headless: FPS and target print every 10 frames. Ctrl+C to stop.", flush=True)
@@ -181,6 +203,7 @@ def main():
 
     pan_angle = float(PAN_CENTER)
     tilt_angle = float(TILT_CENTER)
+    scan_direction = 1  # 1 = pan right, -1 = pan left (when no target)
     fps_counter, fps_timer, fps_display = 0, time.time(), 0
     track_args = {"persist": True, "verbose": False}
 
@@ -268,20 +291,32 @@ def main():
                 # Dimensions below the box (width x height in pixels)
                 cv2.putText(frame, dims, (x1, y2 + 16), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
 
-            if best_cx is not None and servo:
-                # Normalized error from center (-1..1)
-                err_x = (best_cx - center_x) / max(center_x, 1)
-                err_y = (best_cy - center_y) / max(center_y, 1)
-                if abs(err_x) < DEADZONE:
-                    err_x = 0
-                if abs(err_y) < DEADZONE:
-                    err_y = 0
-                pan_angle = pan_angle + args.gain * err_x * (PAN_RANGE[1] - PAN_RANGE[0]) * 0.5
-                tilt_angle = tilt_angle + args.gain * err_y * (TILT_RANGE[1] - TILT_RANGE[0]) * 0.5
-                pan_angle = max(PAN_RANGE[0], min(PAN_RANGE[1], pan_angle))
-                tilt_angle = max(TILT_RANGE[0], min(TILT_RANGE[1], tilt_angle))
-                servo.set_angle(PAN_SERVO_PORT, int(round(pan_angle)))
-                servo.set_angle(TILT_SERVO_PORT, int(round(tilt_angle)))
+            if servo:
+                if best_cx is not None:
+                    # Track target: center the largest person/cat
+                    err_x = (best_cx - center_x) / max(center_x, 1)
+                    err_y = (best_cy - center_y) / max(center_y, 1)
+                    if abs(err_x) < DEADZONE:
+                        err_x = 0
+                    if abs(err_y) < DEADZONE:
+                        err_y = 0
+                    pan_angle = pan_angle + args.gain * err_x * (PAN_RANGE[1] - PAN_RANGE[0]) * 0.5
+                    tilt_angle = tilt_angle + args.gain * err_y * (TILT_RANGE[1] - TILT_RANGE[0]) * 0.5
+                    pan_angle = max(PAN_RANGE[0], min(PAN_RANGE[1], pan_angle))
+                    tilt_angle = max(TILT_RANGE[0], min(TILT_RANGE[1], tilt_angle))
+                    servo.set_angle(PAN_SERVO_PORT, int(round(pan_angle)))
+                    servo.set_angle(TILT_SERVO_PORT, int(round(tilt_angle)))
+                else:
+                    # No target: scan pan left and right
+                    pan_angle = pan_angle + scan_direction * SCAN_STEP
+                    if pan_angle >= PAN_RANGE[1]:
+                        pan_angle = float(PAN_RANGE[1])
+                        scan_direction = -1
+                    elif pan_angle <= PAN_RANGE[0]:
+                        pan_angle = float(PAN_RANGE[0])
+                        scan_direction = 1
+                    servo.set_angle(PAN_SERVO_PORT, int(round(pan_angle)))
+                    servo.set_angle(TILT_SERVO_PORT, int(round(tilt_angle)))  # keep tilt where it was
 
             # Draw
             if best_cx is not None:
@@ -297,8 +332,8 @@ def main():
                 fps_counter = 0
                 fps_timer = time.time()
             if args.no_window and (fps_counter % 10 == 0 or fps_counter == 1):
-                print("FPS: %d | Target: %s" % (fps_display, best_label if best_label else "none"), flush=True)
-            status = "FPS: %d | Target: %s" % (fps_display, best_label if best_label else "none")
+                print("FPS: %d | Target: %s" % (fps_display, best_label if best_label else "scanning"), flush=True)
+            status = "FPS: %d | Target: %s" % (fps_display, best_label if best_label else "scanning")
             cv2.putText(
                 frame, status,
                 (10, 28), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2
