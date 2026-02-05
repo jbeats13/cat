@@ -121,7 +121,7 @@ class _Picamera2Capture:
 
 
 # --- Config (override with CLI) ---
-MODEL_FILE = "yolo11s.pt"  # Path relative to repo root or cwd
+MODEL_FILE = "yolo11n.pt"  # Nano (fastest on Pi); or yolo11s.pt for slightly better accuracy
 CONF = 0.35
 IOU = 0.3
 TRACKER = "bytetrack.yaml"

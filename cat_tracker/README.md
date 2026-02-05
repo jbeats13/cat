@@ -19,7 +19,7 @@ python3 cat_tracker.py --install-deps-all  # Optional: add Adafruit libs for ser
 python3 cat_tracker.py                     # Run (or --no-servo / --no-window as needed)
 ```
 
-You need a YOLO model (e.g. `yolo11s.pt`) in the repo root; the script looks for it automatically.
+You need a YOLO model (default `yolo11n.pt` for Pi; or `yolo11s.pt`) in the repo root; the script looks for it or downloads it on first run.
 
 ## Requirements
 
@@ -109,7 +109,7 @@ If the servos sweep once and return to center, wiring and I2C are good. If you g
 
 ### 6. YOLO model
 
-The script looks for a YOLO model named `yolo11s.pt` in the **repo root** (`~/cat/yolo11s.pt` when you cloned into `~/cat`). If the repo doesn’t include it, the first run may download it automatically (Ultralytics can do this), or you can download a small model and put it there. You can also pass a path: `--model /path/to/model.pt`.
+The script looks for a YOLO model (default `yolo11n.pt`) in the **repo root** (`~/cat/yolo11s.pt` when you cloned into `~/cat`). If the repo doesn’t include it, the first run may download it automatically (Ultralytics can do this), or you can download a small model and put it there. You can also pass a path: `--model /path/to/model.pt`.
 
 ### 7. Run the tracker
 
@@ -262,7 +262,7 @@ pip install opencv-python-headless
 
 **6. YOLO model**
 
-The repo may include `yolo11s.pt` in the repo root (`~/cat/yolo11s.pt`). If not, download a YOLO model and put it there, or pass its path with `--model /path/to/model.pt`.
+The script uses `yolo11n.pt` by default (downloads if missing). The repo may also include `yolo11s.pt`; use `--model yolo11s.pt` for better accuracy. Or pass any path: `--model /path/to/model.pt`.
 
 **7. Run the tracker**
 
@@ -441,7 +441,7 @@ python3 cat_tracker.py --no-servo
 | `--min-width`, `--min-height` | Min box size (px) to track; default 50×50. |
 | `--camera 0` or `--camera /dev/video0` | Camera index or device path (default 0). |
 | `--camera-backend auto \| opencv \| picamera2` | Use `picamera2` for Raspberry Pi camera (e.g. imx708) when OpenCV cannot open the device (default: auto). |
-| `--model path/to/yolo11s.pt` | YOLO model path (default: repo root `yolo11s.pt`). |
+| `--model path/to/yolo11n.pt` | YOLO model path (default: `yolo11n.pt` for Pi; use `yolo11s.pt` for better accuracy). |
 | `--gain 0.4` | Tracking gain; higher = servos react faster. |
 | `--track cat,person` | Classes to track (default: cat,person). |
 
