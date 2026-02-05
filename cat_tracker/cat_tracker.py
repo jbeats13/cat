@@ -20,6 +20,7 @@ import argparse
 import os
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -186,6 +187,7 @@ def main():
     parser.add_argument("--height", type=int, default=480, help="Camera frame height (default 480); lower = higher FPS, e.g. 320")
     parser.add_argument("--scan-step", type=float, default=SCAN_STEP, help="Pan degrees per frame when scanning (default %.1f); lower = smoother, e.g. 0.5 or 1.0" % SCAN_STEP)
     parser.add_argument("--headless-sleep", type=float, default=0.01, help="Seconds to sleep per frame when --no-window (default 0.01); 0 = max FPS", metavar="SECS")
+    parser.add_argument("--threaded-capture", action="store_true", help="Grab frames in a background thread (overlaps capture with inference; can improve FPS)")
     args = parser.parse_args()
 
     if args.install_deps:
@@ -325,6 +327,32 @@ def main():
             print("Continuing without window (tracking and servo still work). Ctrl+C to stop.", flush=True)
             print("FPS and target will print every 10 frames.", flush=True)
 
+    # Optional: background thread to grab frames (overlaps capture with inference)
+    _capture_stop = threading.Event()
+    _latest_frame = [None]
+    _frame_lock = threading.Lock()
+
+    def _capture_loop():
+        while not _capture_stop.is_set():
+            ok, f = cap.read()
+            with _frame_lock:
+                if ok and f is not None:
+                    _latest_frame[0] = f.copy()
+
+    if args.threaded_capture:
+        _t = threading.Thread(target=_capture_loop, daemon=True)
+        _t.start()
+        for _ in range(500):
+            with _frame_lock:
+                if _latest_frame[0] is not None:
+                    break
+            time.sleep(0.01)
+        else:
+            _capture_stop.set()
+            raise SystemError("Threaded capture: no frame received in 5s.")
+        if not show_window:
+            print("Threaded capture: using background thread for frames.", flush=True)
+
     try:
         if not show_window:
             print("Headless: status every 2s below. Ctrl+C to stop.", flush=True)
@@ -332,13 +360,20 @@ def main():
             print("(Window could not be opened; continuing without display.)", flush=True)
         frame_count = 0
         while cap.isOpened():
-            if frame_count == 0 and not show_window:
-                print("Reading first frame from camera...", flush=True)
-            ok, frame = cap.read()
-            if not ok:
-                if not show_window:
-                    print("Camera read failed (no frame). Check camera and --camera index.", flush=True)
-                break
+            if args.threaded_capture:
+                with _frame_lock:
+                    frame = _latest_frame[0].copy() if _latest_frame[0] is not None else None
+                if frame is None:
+                    time.sleep(0.005)
+                    continue
+            else:
+                if frame_count == 0 and not show_window:
+                    print("Reading first frame from camera...", flush=True)
+                ok, frame = cap.read()
+                if not ok:
+                    if not show_window:
+                        print("Camera read failed (no frame). Check camera and --camera index.", flush=True)
+                    break
             frame_count += 1
             if frame_count == 1 and not show_window:
                 print("First frame OK. Running YOLO (first run can take 30-60s on Pi)...", flush=True)
@@ -502,6 +537,9 @@ def main():
                 if args.headless_sleep > 0:
                     time.sleep(args.headless_sleep)
     finally:
+        if args.threaded_capture:
+            _capture_stop.set()
+            _t.join(timeout=2.0)
         cap.release()
         if servo:
             servo.set_angle(PAN_SERVO_PORT, PAN_CENTER)

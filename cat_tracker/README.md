@@ -312,7 +312,9 @@ If the PCA9685 is connected correctly, you’ll see **40** in the grid (its defa
 ### Performance on Pi
 
 - YOLO on Raspberry Pi (CPU only) is relatively slow (often a few FPS). That’s normal.
-- To speed up: use a smaller model or lower camera resolution; or a Pi with NPU (e.g. Pi 5) if supported.
+- **In this app:** Use default `yolo11n.pt`, `--width 416 --height 320`, `--headless-sleep 0`, and `--threaded-capture` for best FPS; `--scan-step 1.0` or `0.5` for smoother scan.
+- **Hardware:** [Google Coral USB Accelerator](https://coral.ai/products/accelerator) or [Hailo-8 AI Hat](https://www.hailo.ai/) (Pi 5) can greatly increase FPS. Overclock (with cooling), Raspberry Pi OS Lite, and a good power supply also help.
+- **Advanced:** Export model to ONNX/OpenVINO/NCNN for possible ARM speedups; see Ultralytics export docs.
 
 ### Run at boot (start when the Pi turns on)
 
@@ -444,6 +446,10 @@ python3 cat_tracker.py --no-servo
 | `--model path/to/yolo11n.pt` | YOLO model path (default: `yolo11n.pt` for Pi; use `yolo11s.pt` for better accuracy). |
 | `--gain 0.4` | Tracking gain; higher = servos react faster. |
 | `--track cat,person` | Classes to track (default: cat,person). |
+| `--width`, `--height` | Frame size (default 640×480); lower = higher FPS (e.g. 416×320). |
+| `--scan-step 1.0` | Pan degrees per frame when scanning; lower = smoother. |
+| `--headless-sleep 0` | Seconds to sleep per frame when `--no-window`; 0 = max FPS. |
+| `--threaded-capture` | Grab frames in a background thread; can improve FPS. |
 
 Press **q** in the window to quit (or **Ctrl+C** in the terminal if using `--no-window`).
 
